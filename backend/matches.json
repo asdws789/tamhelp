@@ -1,0 +1,121 @@
+{
+  "matches": [
+    {
+      "id": 1,
+      "teamId": 323805,
+      "competition": "NB III Nyugat",
+      "homeTeam": "CSAPAT 2",
+      "awayTeam": "ETO",
+      "date": "2026-04-09",
+      "time": "14:50",
+      "venue": "ETO Park",
+      "status": "ended",
+      "score": "1 - 2",
+      "winner": "ETO"
+    },
+    {
+      "id": 6,
+      "teamId": 323805,
+      "competition": "NB III Nyugat",
+      "homeTeam": "CSAPAT 2",
+      "awayTeam": "ETO",
+      "date": "2026-04-23",
+      "time": "14:50",
+      "venue": "ETO Park",
+      "status": "ended",
+      "score": "2 - 0",
+      "winner": "CSAPAT 2"
+    },
+    {
+      "id": 7,
+      "teamId": 323805,
+      "competition": "NB III Nyugat",
+      "homeTeam": "CSAPAT 2",
+      "awayTeam": "ETO",
+      "date": "2026-06-09",
+      "time": "14:50",
+      "venue": "ETO Park",
+      "status": "ended",
+      "score": "1 - 1",
+      "winner": "Döntetlen"
+    },
+    {
+      "id": 3,
+      "teamId": 323805,
+      "competition": "NB III Nyugat",
+      "homeTeam": "CSAPAT 1",
+      "awayTeam": "ETO",
+      "date": "2026-03-09",
+      "time": "14:50",
+      "venue": "ETO Park",
+      "status": "ended",
+      "score": "0 - 3",
+      "winner": "ETO"
+    },
+    {
+      "id": 4,
+      "teamId": 323805,
+      "competition": "NB III Nyugat",
+      "homeTeam": "CSAPAT 5",
+      "awayTeam": "ETO",
+      "date": "2026-02-09",
+      "time": "14:50",
+      "venue": "ETO Park",
+      "status": "ended",
+      "score": "2 - 2",
+      "winner": "Döntetlen"
+    },
+    {
+      "id": 100001,
+      "teamId": 323805,
+      "competition": "NB III Nyugat",
+      "homeTeam": "Rába ETO SE Győr",
+      "awayTeam": "FC Example",
+      "date": "2026-10-10",
+      "time": "16:00",
+      "venue": "ETO Park",
+      "status": "ended",
+      "score": "3 - 1",
+      "winner": "Rába ETO SE Győr"
+    },
+    {
+      "id": 100002,
+      "teamId": 323805,
+      "competition": "NB III Nyugat",
+      "homeTeam": "Example United",
+      "awayTeam": "Rába ETO SE Győr",
+      "date": "2026-10-17",
+      "time": "15:00",
+      "venue": "Example Stadion",
+      "status": "ended",
+      "score": "0 - 2",
+      "winner": "Rába ETO SE Győr"
+    },
+    {
+      "id": 100003,
+      "teamId": 323805,
+      "competition": "NB III Nyugat",
+      "homeTeam": "Rába ETO SE Győr",
+      "awayTeam": "Another FC",
+      "date": "2026-10-24",
+      "time": "17:00",
+      "venue": "ETO Park",
+      "status": "ended",
+      "score": "1 - 0",
+      "winner": "Rába ETO SE Győr"
+    },
+    {
+      "id": 100004,
+      "teamId": 323807,
+      "competition": "NB III Nyugat",
+      "homeTeam": "Rába ETO SE Győr",
+      "awayTeam": "Another FC",
+      "date": "2026-10-24",
+      "time": "17:00",
+      "venue": "ETO Park",
+      "status": "ended",
+      "score": "2 - 1",
+      "winner": "Rába ETO SE Győr"
+    }
+  ]
+}

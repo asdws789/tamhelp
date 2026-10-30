@@ -1,0 +1,22 @@
+# docker-compose.yml
+# Rába ETO Digitális Eseménynapló - Hordozható PostgreSQL Adatbázis Konténer
+# Bármilyen gépen indítható a következő paranccsal:
+# docker compose up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: esemenynaplodigit-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: esemenynaplodigit
+    ports:
+      - "5432:5432"
+    volumes:
+      - esemenynaplo_pgdata:/var/lib/postgresql/data
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  esemenynaplo_pgdata:
