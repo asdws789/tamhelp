@@ -142,17 +142,15 @@ app.put("/api/matches/:id", async (req, res) => {
 
 function buildStandaloneMatchPdfHtml(match, customHtml = null) {
   if (customHtml) {
-    // Ha kaptunk egyedi HTML-t az EventLogEditorból
     return `
       <!DOCTYPE html>
       <html lang="hu">
       <head>
         <meta charset="UTF-8" />
-        <title>${match?.title || "Eseménynapló"} - Összefoglaló</title>
+        <title>${match?.title || "Eseménynapló"}</title>
         <style>
-          @page { size: A4; margin: 15mm; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 0; color: #111827; }
-          img { max-height: 65px; height: auto; }
+          @page { size: A4 portrait; margin: 12mm 15mm; }
+          body { font-family: "Times New Roman", Times, serif; margin: 0; padding: 0; color: #000000; background: #ffffff; }
         </style>
       </head>
       <body>
@@ -162,89 +160,208 @@ function buildStandaloneMatchPdfHtml(match, customHtml = null) {
     `;
   }
 
-  // Alapértelmezett hivatalos összefoglaló sablon
-  const title = match?.title || "Rába ETO Mérkőzés";
-  const date = match?.date || "N/A";
-  const time = match?.time || "";
-  const venue = match?.venue || "ETO Park Győr";
-  const score = match?.score || "N/A";
-  const winner = match?.winner || "N/A";
-  const statusText = match?.status === "finalized" ? "Lezárt eseménynapló" : "Eseménynapló";
+  // Pontos kinézet a mintakép alapján
+  const title = match?.title || "RabaETO – Nem RábaETO";
+  const date = match?.date || "2026.04.12.";
+  const time = match?.time || "14.52";
+  const competition = match?.competition || "Mérkőzéselnevezés";
 
   return `
     <!DOCTYPE html>
     <html lang="hu">
     <head>
       <meta charset="UTF-8" />
-      <title>${title} - Hivatalos Eseménynapló</title>
+      <title>Eseménynapló</title>
       <style>
-        @page { size: A4; margin: 15mm; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #111827; background: #fff; }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #2E7D32; padding-bottom: 16px; margin-bottom: 24px; }
-        .title { font-size: 24px; font-weight: bold; color: #1f2937; margin: 0; }
-        .subtitle { font-size: 13px; color: #4b5563; margin-top: 4px; }
-        .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; background: #e5e7eb; color: #374151; }
-        .badge-finalized { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-        .card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 18px; }
-        .card-label { font-size: 11px; text-transform: uppercase; color: #6b7280; font-weight: 600; margin-bottom: 4px; }
-        .card-value { font-size: 15px; font-weight: bold; color: #111827; }
-        .result-box { background: #f0fdf4; border: 2px solid #2E7D32; border-radius: 8px; padding: 16px 20px; margin-bottom: 24px; text-align: center; }
-        .result-score { font-size: 26px; font-weight: 800; color: #15803d; margin: 0; }
-        .result-winner { font-size: 14px; color: #374151; margin-top: 4px; font-weight: 600; }
-        .footer { margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 16px; font-size: 11px; color: #9ca3af; text-align: center; }
+        @page { size: A4 portrait; margin: 12mm 16mm; }
+        body {
+          font-family: "Times New Roman", Times, serif;
+          margin: 0;
+          padding: 20px 25px;
+          color: #000000;
+          background: #ffffff;
+          font-size: 11pt;
+          line-height: 1.35;
+        }
+        .header-container {
+          position: relative;
+          min-height: 100px;
+          margin-bottom: 28px;
+        }
+        .logo-box {
+          position: absolute;
+          right: 0;
+          top: 0;
+        }
+        .logo-box img {
+          height: 95px;
+          width: auto;
+          display: block;
+        }
+        .title-box {
+          text-align: center;
+          padding-top: 28px;
+        }
+        .title-box h1 {
+          font-family: "Times New Roman", Times, serif;
+          font-size: 22pt;
+          font-weight: bold;
+          margin: 0;
+          color: #000000;
+        }
+        .meta-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 30px;
+          font-family: "Times New Roman", Times, serif;
+          font-size: 11pt;
+        }
+        .meta-table td.label {
+          width: 53%;
+          font-weight: bold;
+          color: #000000;
+          padding: 3px 8px 3px 0;
+          vertical-align: top;
+        }
+        .meta-table td.value {
+          width: 47%;
+          font-weight: normal;
+          color: #000000;
+          padding: 3px 0;
+          vertical-align: top;
+        }
+        .events-table {
+          width: 100%;
+          border-collapse: collapse;
+          border-spacing: 0;
+          font-family: "Times New Roman", Times, serif;
+          font-size: 10pt;
+          border: 1.5px solid #000000;
+        }
+        .events-table th {
+          background-color: #DDE3EA;
+          border: 1px solid #000000;
+          padding: 7px 6px;
+          font-weight: bold;
+          color: #000000;
+          vertical-align: middle;
+        }
+        .events-table td {
+          border: 1px solid #000000;
+          padding: 6px 8px;
+          color: #000000;
+          vertical-align: top;
+          line-height: 1.3;
+        }
+        .text-center { text-align: center; }
+        .text-left { text-align: left; }
       </style>
     </head>
     <body>
-      <div class="header">
-        <div>
-          <h1 class="title">Digitális Eseménynapló Összefoglaló</h1>
-          <p class="subtitle">Rába ETO SE Hivatalos Jegyzőkönyv</p>
-        </div>
-        ${logoBase64 ? `<img src="${logoBase64}" alt="Rába ETO Logo" style="height: 60px; object-fit: contain;" />` : ""}
-      </div>
-
-      <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-        <span class="badge badge-finalized">${statusText}</span>
-        <span style="font-size: 13px; color: #6b7280;">Azonosító: #${match?.id || ""}</span>
-      </div>
-
-      <div class="result-box">
-        <div class="card-label">Hivatalos Végeredmény</div>
-        <div class="result-score">${score}</div>
-        <div class="result-winner">Győztes csapat: <strong>${winner}</strong></div>
-      </div>
-
-      <div class="grid">
-        <div class="card">
-          <div class="card-label">Mérkőző Felek</div>
-          <div class="card-value">${title}</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Időpont</div>
-          <div class="card-value">${date} ${time}</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Helyszín</div>
-          <div class="card-value">${venue}</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Rendező Szervezet</div>
-          <div class="card-value">Rába ETO SE Győr</div>
+      <div class="header-container">
+        ${logoBase64 ? `<div class="logo-box"><img src="${logoBase64}" alt="ETO Logo" /></div>` : ""}
+        <div class="title-box">
+          <h1>Eseménynapló</h1>
         </div>
       </div>
 
-      <div class="card" style="margin-bottom: 24px;">
-        <div class="card-label">Biztonsági és Szervezői Záradék</div>
-        <p style="margin: 6px 0 0 0; font-size: 13px; color: #374151; line-height: 1.5;">
-          A mérkőzés digitális eseménynaplója hivatalosan lezárásra került. Az események és a biztonsági bejegyzések ellenőrzése megtörtént.
-        </p>
-      </div>
+      <table class="meta-table">
+        <tbody>
+          <tr>
+            <td class="label">Versenyrendszer megnevezése:</td>
+            <td class="value">${competition}</td>
+          </tr>
+          <tr>
+            <td class="label">Mérkőző csapatok megnevezése (hazai / vendég):</td>
+            <td class="value">${title}</td>
+          </tr>
+          <tr>
+            <td class="label">Mérkőzés ideje:</td>
+            <td class="value">${date} ${time}</td>
+          </tr>
+          <tr>
+            <td class="label">Biztonsági felelős megnevezése és elérhetősége:</td>
+            <td class="value">Valaki 03635379</td>
+          </tr>
+          <tr>
+            <td class="label">Rendező vagy rendező szerv megnevezése:</td>
+            <td class="value">Szervező</td>
+          </tr>
+          <tr>
+            <td class="label">Főrendező megnevezése:</td>
+            <td class="value">Valaki2 03654892</td>
+          </tr>
+          <tr>
+            <td class="label">Eseménynaplót vezető megnevezése és elérhetősége:</td>
+            <td class="value">Valaki3</td>
+          </tr>
+          <tr>
+            <td class="label">Egészségügyi biztosításért felelős szervezet és személy:</td>
+            <td class="value">Szervezet – Személy</td>
+          </tr>
+          <tr>
+            <td class="label">Katasztrófavédelmi biztosításért felelős szervezet és személy:</td>
+            <td class="value">Katasztrofavédelmisek – Valaki4</td>
+          </tr>
+          ${
+            match?.score
+              ? `
+          <tr>
+            <td class="label">Hivatalos végeredmény és győztes:</td>
+            <td class="value"><strong>${match.score}</strong> (Győztes: ${match.winner || "N/A"})</td>
+          </tr>
+          `
+              : ""
+          }
+        </tbody>
+      </table>
 
-      <div class="footer">
-        Ez a dokumentum a Rába ETO Digitális Eseménynapló rendszer által automatikusan generált hivatalos PDF összefoglaló.
-        <br />Kelt: ${new Date().toLocaleDateString("hu-HU")}
-      </div>
+      <table class="events-table">
+        <thead>
+          <tr>
+            <th class="text-center" style="width: 45px;">SSZ</th>
+            <th class="text-center" style="width: 65px;">Időpont</th>
+            <th class="text-left" style="width: 125px;">Eseményt jelentő</th>
+            <th class="text-left">Esemény leírása</th>
+            <th class="text-left" style="width: 125px;">Intézkedést meghatározó</th>
+            <th class="text-left" style="width: 135px;">Intézkedés / eredmény</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="text-center">1</td>
+            <td class="text-center">14:55</td>
+            <td>Valaki5</td>
+            <td>Esemény leírása, hosszasan elemezve</td>
+            <td>Valaki5</td>
+            <td>Intézkedés eredménye</td>
+          </tr>
+          <tr>
+            <td class="text-center">2</td>
+            <td class="text-center">15:10</td>
+            <td>Valaki6</td>
+            <td>Esemény leírása</td>
+            <td>Valaki6</td>
+            <td>Intézkedés eredménye</td>
+          </tr>
+          <tr>
+            <td class="text-center">3</td>
+            <td class="text-center">15:42</td>
+            <td>Valaki7</td>
+            <td>Esemény leírása</td>
+            <td>Valaki7</td>
+            <td>Intézkedés eredménye</td>
+          </tr>
+          <tr>
+            <td class="text-center">4</td>
+            <td class="text-center">16:20</td>
+            <td>Valaki8</td>
+            <td>Esemény leírása</td>
+            <td>Valaki8</td>
+            <td>Intézkedés eredménye</td>
+          </tr>
+        </tbody>
+      </table>
     </body>
     </html>
   `;

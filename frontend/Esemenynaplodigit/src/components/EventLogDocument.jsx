@@ -1,5 +1,6 @@
 // EventLogDocument.jsx
 import logo from "../assets/logo.png";
+import { eventRows as defaultSampleRows } from "../data/EventLogData";
 
 export default function EventLogDocument({ meta = {}, rows = [] }) {
   const securityOfficer = meta.securityOfficer || {};
@@ -7,279 +8,239 @@ export default function EventLogDocument({ meta = {}, rows = [] }) {
   const medicalService = meta.medicalService || {};
   const disasterProtection = meta.disasterProtection || {};
 
+  // Ha nincsenek események átadva, használjuk az alapértelmezett minta eseményeket
+  const displayRows = rows && rows.length > 0 ? rows : defaultSampleRows;
+
+  const homeAway =
+    meta.homeTeam && meta.awayTeam
+      ? `${meta.homeTeam} – ${meta.awayTeam}`
+      : meta.homeTeam || meta.awayTeam || "RabaETO – Nem RábaETO";
+
+  const matchDateTime = `${meta.matchDate || "2026.04.12."} ${meta.matchTime || "14.52"}`.trim();
+
+  const securityInfo =
+    `${securityOfficer.name || ""} ${securityOfficer.phone || ""}`.trim() ||
+    meta.securityOfficerName ||
+    "Valaki 03635379";
+
+  const headOrganizerInfo =
+    `${headOrganizer.name || ""} ${headOrganizer.phone || ""}`.trim() ||
+    meta.headOrganizerName ||
+    "Valaki2 03654892";
+
+  const medicalInfo =
+    medicalService.organization || medicalService.person
+      ? `${medicalService.organization || ""} – ${medicalService.person || ""}`.replace(/^ – | – $/g, "")
+      : "Szervezet – Személy";
+
+  const disasterInfo =
+    disasterProtection.organization || disasterProtection.person
+      ? `${disasterProtection.organization || ""} – ${disasterProtection.person || ""}`.replace(/^ – | – $/g, "")
+      : "Katasztrofavédelmisek – Valaki4";
+
   return (
     <div
       style={{
-        padding: "32px",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        color: "#111827",
+        padding: "36px 40px",
+        fontFamily: '"Times New Roman", Times, serif',
+        color: "#000000",
         backgroundColor: "#ffffff",
-        maxWidth: "100%",
+        maxWidth: "850px",
+        margin: "0 auto",
         boxSizing: "border-box",
+        fontSize: "11pt",
+        lineHeight: "1.35",
       }}
     >
       {/* =======================================================
-          FEJLÉC: CÍM ÉS LOGÓ TÖKÉLETESEN ELVÁLASZTVA
-          (Nincs position absolute, így nem lóg bele semmilyen szövegbe!)
+          FEJLÉC: KÖZÉPRE IGAZÍTOTT CÍM ÉS JOBB FELSŐ LOGÓ
          ======================================================= */}
       <div
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
+          position: "relative",
           marginBottom: "28px",
-          paddingBottom: "16px",
-          borderBottom: "2px solid #2E7D32",
+          minHeight: "100px",
         }}
       >
-        <div>
-          <h1
-            style={{
-              fontSize: "26px",
-              fontWeight: "bold",
-              margin: 0,
-              color: "#1f2937",
-              letterSpacing: "-0.5px",
-            }}
-          >
-            Eseménynapló
-          </h1>
-          <p
-            style={{
-              margin: "4px 0 0 0",
-              fontSize: "13px",
-              color: "#4b5563",
-              fontWeight: "500",
-            }}
-          >
-            Rába ETO Digitális Eseménynapló Dokumentum
-          </p>
-        </div>
-
-        <div style={{ flexShrink: 0 }}>
+        <div
+          style={{
+            position: "absolute",
+            right: "0",
+            top: "0",
+          }}
+        >
           <img
             src={logo}
             alt="Rába ETO logo"
             style={{
-              height: "65px",
+              height: "95px",
               width: "auto",
-              maxHeight: "65px",
+              maxHeight: "95px",
               objectFit: "contain",
               display: "block",
             }}
           />
         </div>
+
+        <div
+          style={{
+            textAlign: "center",
+            paddingTop: "28px",
+          }}
+        >
+          <h1
+            style={{
+              fontFamily: '"Times New Roman", Times, serif',
+              fontSize: "22pt",
+              fontWeight: "bold",
+              margin: 0,
+              color: "#000000",
+              letterSpacing: "0.5px",
+            }}
+          >
+            Eseménynapló
+          </h1>
+        </div>
       </div>
 
       {/* =======================================================
-          MÉRKŐZÉS TÖRZSEDATOK (2 OSZLOPOS RÁCS)
+          MÉRKŐZÉS TÖRZSEDATOK (PONTOS IGAZÍTÁS)
          ======================================================= */}
-      <div
+      <table
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          columnGap: "32px",
-          rowGap: "10px",
-          marginBottom: "28px",
+          width: "100%",
+          borderCollapse: "collapse",
+          marginBottom: "30px",
+          fontFamily: '"Times New Roman", Times, serif',
+          fontSize: "11pt",
         }}
       >
-        <Field
-          label="Versenyrendszer megnevezése"
-          value={meta.competitionName}
-        />
-        <Field
-          label="Mérkőző csapatok (hazai – vendég)"
-          value={
-            meta.homeTeam && meta.awayTeam
-              ? `${meta.homeTeam} – ${meta.awayTeam}`
-              : meta.homeTeam || meta.awayTeam || "—"
-          }
-        />
-        <Field
-          label="Mérkőzés ideje"
-          value={`${meta.matchDate || ""} ${meta.matchTime || ""}`.trim()}
-        />
-        <Field
-          label="Biztonsági felelős és elérhetősége"
-          value={`${securityOfficer.name || ""} ${securityOfficer.phone || ""}`.trim()}
-        />
-        <Field
-          label="Rendező szerv megnevezése"
-          value={meta.organizer}
-        />
-        <Field
-          label="Főrendező megnevezése"
-          value={`${headOrganizer.name || ""} ${headOrganizer.phone || ""}`.trim()}
-        />
-        <Field
-          label="Eseménynaplót vezető személy"
-          value={meta.eventLogLeader}
-        />
-        <Field
-          label="Egészségügyi biztosítás"
-          value={
-            medicalService.organization || medicalService.person
-              ? `${medicalService.organization || ""} – ${medicalService.person || ""}`.replace(/^ – | – $/g, "")
-              : "—"
-          }
-        />
-        <Field
-          label="Katasztrófavédelmi biztosítás"
-          value={
-            disasterProtection.organization || disasterProtection.person
-              ? `${disasterProtection.organization || ""} – ${disasterProtection.person || ""}`.replace(/^ – | – $/g, "")
-              : "—"
-          }
-        />
-        {meta.score && (
-          <Field
-            label="Végeredmény és győztes"
-            value={`${meta.score} (${meta.winner || "—"})`}
-          />
-        )}
-      </div>
+        <tbody>
+          <tr>
+            <td style={labelStyle}>Versenyrendszer megnevezése:</td>
+            <td style={valueStyle}>{meta.competitionName || "Mérkőzéselnevezés"}</td>
+          </tr>
+          <tr>
+            <td style={labelStyle}>Mérkőző csapatok megnevezése (hazai / vendég):</td>
+            <td style={valueStyle}>{homeAway}</td>
+          </tr>
+          <tr>
+            <td style={labelStyle}>Mérkőzés ideje:</td>
+            <td style={valueStyle}>{matchDateTime}</td>
+          </tr>
+          <tr>
+            <td style={labelStyle}>Biztonsági felelős megnevezése és elérhetősége:</td>
+            <td style={valueStyle}>{securityInfo}</td>
+          </tr>
+          <tr>
+            <td style={labelStyle}>Rendező vagy rendező szerv megnevezése:</td>
+            <td style={valueStyle}>{meta.organizer || "Szervező"}</td>
+          </tr>
+          <tr>
+            <td style={labelStyle}>Főrendező megnevezése:</td>
+            <td style={valueStyle}>{headOrganizerInfo}</td>
+          </tr>
+          <tr>
+            <td style={labelStyle}>Eseménynaplót vezető megnevezése és elérhetősége:</td>
+            <td style={valueStyle}>{meta.eventLogLeader || "Valaki3"}</td>
+          </tr>
+          <tr>
+            <td style={labelStyle}>Egészségügyi biztosításért felelős szervezet és személy:</td>
+            <td style={valueStyle}>{medicalInfo}</td>
+          </tr>
+          <tr>
+            <td style={labelStyle}>Katasztrófavédelmi biztosításért felelős szervezet és személy:</td>
+            <td style={valueStyle}>{disasterInfo}</td>
+          </tr>
+          {(meta.score || meta.winner) && (
+            <tr>
+              <td style={labelStyle}>Hivatalos végeredmény és győztes:</td>
+              <td style={valueStyle}>
+                <strong>{meta.score || "N/A"}</strong> (Győztes: {meta.winner || "N/A"})
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
 
       {/* =======================================================
-          ESEMÉNYTÁBLÁZAT
+          ESEMÉNYTÁBLÁZAT (FEKETE KERET, LÁGY KÉKES-SZÜRKE FEJLÉC)
          ======================================================= */}
       <table
         style={{
           width: "100%",
           borderCollapse: "collapse",
           borderSpacing: "0",
-          marginTop: "16px",
-          tableLayout: "fixed",
-          fontSize: "12px",
+          fontFamily: '"Times New Roman", Times, serif',
+          fontSize: "10pt",
+          border: "1.5px solid #000000",
         }}
       >
         <thead>
-          <tr>
-            <Th style={{ width: "45px", textAlign: "center" }}>SSZ</Th>
-            <Th style={{ width: "80px" }}>Időpont</Th>
-            <Th style={{ width: "130px" }}>Eseményt jelentő</Th>
-            <Th style={{ width: "180px", textAlign: "left" }}>Esemény leírása</Th>
-            <Th style={{ width: "130px" }}>Intézkedést hozó</Th>
-            <Th style={{ textAlign: "left" }}>Intézkedés / eredmény</Th>
+          <tr style={{ backgroundColor: "#DDE3EA" }}>
+            <th style={{ ...thStyle, width: "45px", textAlign: "center" }}>SSZ</th>
+            <th style={{ ...thStyle, width: "65px", textAlign: "center" }}>Időpont</th>
+            <th style={{ ...thStyle, width: "125px", textAlign: "left" }}>Eseményt jelentő</th>
+            <th style={{ ...thStyle, textAlign: "left" }}>Esemény leírása</th>
+            <th style={{ ...thStyle, width: "125px", textAlign: "left" }}>Intézkedést meghatározó</th>
+            <th style={{ ...thStyle, width: "135px", textAlign: "left" }}>Intézkedés / eredmény</th>
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td
-                colSpan={6}
-                style={{
-                  border: "1px solid #d1d5db",
-                  padding: "16px",
-                  textAlign: "center",
-                  color: "#6b7280",
-                  fontStyle: "italic",
-                }}
-              >
-                Nincs rögzített esemény ebben az eseménynaplóban.
+          {displayRows.map((row, index) => (
+            <tr key={row.id || index}>
+              <td style={{ ...tdStyle, textAlign: "center" }}>
+                {row.sequenceNumber || index + 1}
               </td>
+              <td style={{ ...tdStyle, textAlign: "center" }}>
+                {row.time || "—"}
+              </td>
+              <td style={tdStyle}>{row.reporterName || "—"}</td>
+              <td style={tdStyle}>{row.eventDescription || row.eventType || "—"}</td>
+              <td style={tdStyle}>{row.decisionMaker || "—"}</td>
+              <td style={tdStyle}>{row.actionResult || row.actionType || "—"}</td>
             </tr>
-          ) : (
-            rows.map((row, index) => (
-              <tr
-                key={row.id || index}
-                style={{
-                  backgroundColor: index % 2 === 1 ? "#f9fafb" : "#ffffff",
-                }}
-              >
-                <Td style={{ textAlign: "center", fontWeight: "bold" }}>
-                  {row.sequenceNumber || index + 1}
-                </Td>
-                <Td>{row.time || "—"}</Td>
-                <Td>{row.reporterName || "—"}</Td>
-                <Td>{row.eventDescription || row.eventType || "—"}</Td>
-                <Td>{row.decisionMaker || "—"}</Td>
-                <Td>{row.actionResult || row.actionType || "—"}</Td>
-              </tr>
-            ))
-          )}
+          ))}
         </tbody>
       </table>
     </div>
   );
 }
 
-/* ---------- helpers ---------- */
+const labelStyle = {
+  width: "53%",
+  fontWeight: "bold",
+  fontSize: "11pt",
+  color: "#000000",
+  padding: "3px 8px 3px 0",
+  verticalAlign: "top",
+  lineHeight: "1.35",
+};
 
-function Field({ label, value }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "baseline",
-        gap: "8px",
-        paddingTop: "3px",
-        paddingBottom: "3px",
-        fontSize: "13px",
-      }}
-    >
-      <span
-        style={{
-          fontWeight: "bold",
-          fontSize: "13px",
-          color: "#374151",
-          whiteSpace: "nowrap",
-          flexShrink: 0,
-        }}
-      >
-        {label}:
-      </span>
-      <span
-        style={{
-          borderBottom: "1px solid #9ca3af",
-          flex: 1,
-          fontSize: "13px",
-          fontWeight: "500",
-          paddingLeft: "4px",
-          color: "#111827",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {value || "—"}
-      </span>
-    </div>
-  );
-}
+const valueStyle = {
+  width: "47%",
+  fontWeight: "normal",
+  fontSize: "11pt",
+  color: "#000000",
+  padding: "3px 0",
+  verticalAlign: "top",
+  lineHeight: "1.35",
+};
 
-function Th({ children, style = {} }) {
-  return (
-    <th
-      style={{
-        border: "1px solid #9ca3af",
-        padding: "8px 10px",
-        fontWeight: "bold",
-        fontSize: "12px",
-        backgroundColor: "#e5e7eb",
-        color: "#111827",
-        textAlign: "left",
-        ...style,
-      }}
-    >
-      {children}
-    </th>
-  );
-}
+const thStyle = {
+  border: "1px solid #000000",
+  padding: "7px 6px",
+  fontWeight: "bold",
+  fontSize: "10pt",
+  color: "#000000",
+  verticalAlign: "middle",
+};
 
-function Td({ children, style = {} }) {
-  return (
-    <td
-      style={{
-        border: "1px solid #d1d5db",
-        padding: "7px 10px",
-        verticalAlign: "top",
-        fontSize: "12px",
-        color: "#1f2937",
-        wordBreak: "break-word",
-        ...style,
-      }}
-    >
-      {children}
-    </td>
-  );
-}
+const tdStyle = {
+  border: "1px solid #000000",
+  padding: "6px 8px",
+  fontSize: "10pt",
+  color: "#000000",
+  verticalAlign: "top",
+  lineHeight: "1.3",
+};
