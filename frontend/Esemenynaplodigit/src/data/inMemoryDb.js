@@ -111,6 +111,14 @@ export const inMemoryDb = {
     return this.matches;
   },
 
+  updateMatch(id, data) {
+    const match = this.matches.find((m) => String(m.id) === String(id));
+    if (match) {
+      Object.assign(match, data);
+    }
+    return match;
+  },
+
   getMasterData() {
     return this.masterData;
   },

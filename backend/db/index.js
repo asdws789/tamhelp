@@ -120,7 +120,7 @@ const db = {
     if (isPostgresConnected) {
       try {
         const res = await pool.query(
-          "SELECT id, title, match_date AS date, match_time AS time, venue, status, score, winner FROM matches ORDER BY id ASC"
+          "SELECT id, title, team_id AS \"teamId\", competition, home_team AS \"homeTeam\", away_team AS \"awayTeam\", match_date AS date, match_time AS time, venue, status, score, winner FROM matches ORDER BY id ASC"
         );
         return res.rows;
       } catch (err) {
@@ -130,19 +130,40 @@ const db = {
     return inMemoryDb.getMatches();
   },
 
-  async updateMatch(id, data) {
+  async getMatchById(id) {
+    const matchId = Number(id);
     if (isPostgresConnected) {
       try {
         const res = await pool.query(
-          "UPDATE matches SET status = COALESCE($1, status), score = COALESCE($2, score), winner = COALESCE($3, winner), updated_at = NOW() WHERE id = $4 RETURNING *",
-          [data.status, data.score, data.winner, id]
+          "SELECT id, title, team_id AS \"teamId\", competition, home_team AS \"homeTeam\", away_team AS \"awayTeam\", match_date AS date, match_time AS time, venue, status, score, winner FROM matches WHERE id = $1",
+          [matchId]
         );
-        return res.rows[0];
+        if (res.rows.length > 0) return res.rows[0];
+      } catch (err) {
+        console.error("[DB] getMatchById hiba:", err.message);
+      }
+    }
+    return inMemoryDb.matches.find((m) => String(m.id) === String(id)) || null;
+  },
+
+  async updateMatch(id, data) {
+    const matchId = Number(id);
+    if (isPostgresConnected) {
+      try {
+        const res = await pool.query(
+          "UPDATE matches SET status = COALESCE($1, status), score = COALESCE($2, score), winner = COALESCE($3, winner), updated_at = NOW() WHERE id = $4 RETURNING id, title, team_id AS \"teamId\", match_date AS date, match_time AS time, venue, status, score, winner",
+          [data.status, data.score, data.winner, matchId]
+        );
+        if (res.rows.length > 0) {
+          const mem = inMemoryDb.matches.find((m) => String(m.id) === String(id));
+          if (mem) Object.assign(mem, data);
+          return res.rows[0];
+        }
       } catch (err) {
         console.error("[DB] updateMatch hiba:", err.message);
       }
     }
-    const match = inMemoryDb.matches.find((m) => m.id === id);
+    const match = inMemoryDb.matches.find((m) => String(m.id) === String(id));
     if (match) {
       Object.assign(match, data);
     }

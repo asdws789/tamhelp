@@ -36,9 +36,90 @@ const inMemoryDb = {
     organization: "Rába ETO SE Győr",
     officialEmail: "szeconnect.projektmunka@gmail.com",
     reportEmail: "szeconnect.projektmunka@gmail.com",
+    phone: "+36 96 123 456",
+    address: "9027 Győr, ETO Park",
+    organizer: "Rába ETO SE Győr",
+    chiefOrganizer: "Főnév Sándor",
+    healthcareProvider: "ETO Egészségügyi Partner Kft.",
+    disasterProtectionProvider: "ETO Katasztrófavédelmi Partner Kft.",
   },
 
+  matches: [
+    {
+      id: 1,
+      title: "CSAPAT 2 vs ETO",
+      date: "2026. 10. 28.",
+      time: "11:00",
+      venue: "ETO Park",
+      status: "in_progress",
+      score: null,
+      winner: null,
+    },
+    {
+      id: 6,
+      title: "CSAPAT 3 vs ETO",
+      date: "2026. 10. 27.",
+      time: "10:00",
+      venue: "ETO Park",
+      status: "in_progress",
+      score: null,
+      winner: null,
+    },
+    {
+      id: 7,
+      title: "CSAPAT 4 vs ETO",
+      date: "2026. 11. 15.",
+      time: "16:00",
+      venue: "ETO Park",
+      status: "in_progress",
+      score: null,
+      winner: null,
+    },
+    {
+      id: 3,
+      title: "CSAPAT 1 vs ETO",
+      date: "2026. 10. 20.",
+      time: "14:50",
+      venue: "ETO Park",
+      status: "finalized",
+      score: "0 - 3",
+      winner: "ETO",
+    },
+    {
+      id: 4,
+      title: "CSAPAT 5 vs ETO",
+      date: "2026. 09. 15.",
+      time: "14:50",
+      venue: "ETO Park",
+      status: "archived",
+      score: "2 - 2",
+      winner: "Döntetlen",
+    },
+  ],
+
   sentEmails: [],
+
+  getUsers() {
+    return this.users;
+  },
+
+  findUser(username, password) {
+    return this.users.find(
+      (u) => u.username === username && u.password === password
+    );
+  },
+
+  getMatches() {
+    return this.matches;
+  },
+
+  updateMatch(id, data) {
+    const match = this.matches.find((m) => String(m.id) === String(id));
+    if (match) {
+      Object.assign(match, data);
+    }
+    return match;
+  },
 
   logEmail(email) {
     const record = {
@@ -50,6 +131,10 @@ const inMemoryDb = {
     this.sentEmails.push(record);
     console.log("[BACKEND IN-MEMORY DB] E-mail mentve:", record);
     return record;
+  },
+
+  getSentEmails() {
+    return this.sentEmails;
   },
 };
 

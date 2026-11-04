@@ -1599,15 +1599,27 @@ function EventLogEditor({
 
     setStatus("finalized");
 
-    // Requirement 3: E-mail küldés lezáráskor
+    const htmlContent = pdfContentRef.current ? pdfContentRef.current.innerHTML : null;
+
+    // Requirement 3: E-mail küldés lezáráskor (PDF csatolmánnyal és közvetlen linkkel)
     await sendEventLogClosedEmail({
       match,
       result: finalResult,
       currentUserEmail: currentUser?.email || "user1@eto.hu",
+      html: htmlContent,
     });
 
+    // Szerveroldali PDF tárolása és frissítése
+    if (htmlContent && match?.id) {
+      fetch(`http://localhost:3000/api/matches/${match.id}/pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: htmlContent }),
+      }).catch((err) => console.warn("PDF tárolási hiba:", err));
+    }
+
     setEmailNotification(
-      `📧 Értesítő e-mail sikeresen elküldve a profilban megadott címre (esemenynaplo@eto.hu).`
+      `📧 Értesítő e-mail sikeresen elküldve a profilban megadott címre PDF csatolmánnyal!`
     );
 
     if (typeof onFinalizeMatch === "function") {
@@ -1705,17 +1717,32 @@ function EventLogEditor({
             </p>
           </div>
 
-          {(meta.score || match?.score) && (
-            <div className="rounded-xl border border-[#2E7D32]/30 bg-[#f0f9f1] px-4 py-2.5 text-right">
-              <div className="text-xs font-medium text-gray-500">Végeredmény:</div>
-              <div className="text-xl font-bold text-[#2E7D32]">
-                {meta.score || match?.score}{" "}
-                <span className="text-sm font-semibold text-gray-700">
-                  (Győztes: {meta.winner || match?.winner})
-                </span>
+          <div className="flex flex-wrap items-center gap-3">
+            {(meta.score || match?.score) && (
+              <div className="rounded-xl border border-[#2E7D32]/30 bg-[#f0f9f1] px-4 py-2.5 text-right">
+                <div className="text-xs font-medium text-gray-500">Végeredmény:</div>
+                <div className="text-xl font-bold text-[#2E7D32]">
+                  {meta.score || match?.score}{" "}
+                  <span className="text-sm font-semibold text-gray-700">
+                    (Győztes: {meta.winner || match?.winner})
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+
+            <button
+              onClick={() =>
+                window.open(
+                  `http://localhost:3000/api/matches/${match?.id}/pdf`,
+                  "_blank"
+                )
+              }
+              className="inline-flex items-center gap-2 rounded-xl bg-[#2E7D32] hover:bg-[#256629] px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all cursor-pointer"
+              title="PDF összefoglaló megnyitása új lapon"
+            >
+              📄 <span>PDF Összefoglaló Megnyitása</span>
+            </button>
+          </div>
         </div>
 
         {/* Értesítési sávok */}

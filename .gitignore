@@ -19,6 +19,10 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
+# Generated PDFs
+backend/public/pdfs/*.pdf
+!backend/public/pdfs/.gitkeep
+
 # OS and Editor files
 .DS_Store
 Thumbs.db

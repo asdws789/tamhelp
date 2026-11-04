@@ -162,6 +162,7 @@ export async function sendEventLogClosedEmail({
   result,
   currentUserEmail = "szeconnect.projektmunka@gmail.com",
   reportEmail = "szeconnect.projektmunka@gmail.com",
+  html = null,
 }) {
   const to = reportEmail;
   const subject = `[Eseménynapló Lezárva] ${match?.title || "Mérkőzés"} - Végeredmény: ${result?.score || "N/A"}`;
@@ -201,6 +202,7 @@ Rába ETO Digitális Eseménynapló Rendszer
         message,
         matchId: match?.id,
         result,
+        html,
       }),
     });
     if (res.ok) {

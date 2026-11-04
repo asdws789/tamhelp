@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { User, Menu } from "lucide-react";
+import { User, Menu, FileText } from "lucide-react";
 
 import LoginPage from "./components/LoginPage";
 import EventLogEditor from "./components/EventLogEditor";
@@ -41,6 +41,26 @@ function App() {
 
   const autoClosedIdsRef = useRef(new Set());
 
+  const loadMatches = async () => {
+    try {
+      const res = await fetch("http://localhost:3000/api/matches");
+      if (res.ok) {
+        const allMatches = await res.json();
+        setMatches(allMatches.filter((m) => m.status === "in_progress"));
+        setClosed(allMatches.filter((m) => m.status === "finalized"));
+        setArchived(allMatches.filter((m) => m.status === "archived"));
+        return;
+      }
+    } catch {
+      // Backend nem elérhető, fallback in-memory
+    }
+
+    const allMatches = inMemoryDb.getMatches();
+    setMatches(allMatches.filter((m) => m.status === "in_progress"));
+    setClosed(allMatches.filter((m) => m.status === "finalized"));
+    setArchived(allMatches.filter((m) => m.status === "archived"));
+  };
+
   useEffect(() => {
     // Adatbázis státusz lekérdezése
     fetch("http://localhost:3000/api/db/status")
@@ -50,18 +70,38 @@ function App() {
         setDbStatus({ connected: false, type: "In-Memory Database" })
       );
 
-    const allMatches = inMemoryDb.getMatches();
-    setMatches(allMatches.filter((m) => m.status === "in_progress"));
-    setClosed(allMatches.filter((m) => m.status === "finalized"));
-    setArchived(allMatches.filter((m) => m.status === "archived"));
+    loadMatches();
   }, []);
 
   /*
    * Mérkőzés véglegesítése (manuális vagy automatikus)
    */
-  const handleFinalizeMatch = (matchId, resultData) => {
+  const handleFinalizeMatch = async (matchId, resultData) => {
+    // 1. Mentés a backend adatbázisba (PostgreSQL vagy szerveroldali in-memory)
+    try {
+      await fetch(`http://localhost:3000/api/matches/${matchId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "finalized",
+          score: resultData?.score || null,
+          winner: resultData?.winner || null,
+        }),
+      });
+    } catch (err) {
+      console.warn("[App] Nem sikerült a backend adatbázis frissítése:", err);
+    }
+
+    // 2. Kliensoldali memóriabeli szinkronizáció
+    inMemoryDb.updateMatch(matchId, {
+      status: "finalized",
+      score: resultData?.score,
+      winner: resultData?.winner,
+    });
+
+    // 3. React állapot azonnali frissítése - típusbiztos string egyezéssel
     setMatches((prevMatches) => {
-      const matchToFinalize = prevMatches.find((m) => m.id === matchId);
+      const matchToFinalize = prevMatches.find((m) => String(m.id) === String(matchId));
       if (matchToFinalize) {
         const finalized = {
           ...matchToFinalize,
@@ -72,14 +112,14 @@ function App() {
         };
         setClosed((prevClosed) => [
           finalized,
-          ...prevClosed.filter((m) => m.id !== matchId),
+          ...prevClosed.filter((m) => String(m.id) !== String(matchId)),
         ]);
-        return prevMatches.filter((m) => m.id !== matchId);
+        return prevMatches.filter((m) => String(m.id) !== String(matchId));
       }
       return prevMatches;
     });
 
-    if (selectedLog && selectedLog.id === matchId) {
+    if (selectedLog && String(selectedLog.id) === String(matchId)) {
       setSelectedLog((prev) =>
         prev
           ? {
@@ -289,7 +329,7 @@ function App() {
    * Mobilon a táblázat vízszintesen görgethető,
    * így nem törik össze a layout kis képernyőn.
    */
-  const renderTable = (data) => (
+  const renderTable = (data, isClosed = false) => (
     <div className="w-full overflow-x-auto rounded-2xl shadow">
       <table className="w-full min-w-[600px] text-sm bg-white">
         <thead className="bg-[#2E7D32] text-white text-left">
@@ -297,34 +337,67 @@ function App() {
             <th className="p-3">Csapatok</th>
             <th className="p-3">Időpont</th>
             <th className="p-3">Helyszín</th>
+            {isClosed && <th className="p-3 text-right">PDF Összefoglaló</th>}
           </tr>
         </thead>
 
         <tbody>
-          {data.map((m) => (
-            <tr
-              key={m.id}
-              onClick={() => handleClick(m)}
-              className="border-t cursor-pointer hover:bg-gray-50 transition-colors"
-            >
-              <td className="p-3 font-medium">
-                {m.title}
-                {m.score && (
-                  <span className="ml-2 inline-block rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
-                    {m.score} ({m.winner})
-                  </span>
-                )}
-              </td>
-
-              <td className="p-3 whitespace-nowrap">
-                {m.date} {m.time}
-              </td>
-
-              <td className="p-3 whitespace-nowrap">
-                ETO Stadion Győr
+          {data.length === 0 ? (
+            <tr>
+              <td
+                colSpan={isClosed ? 4 : 3}
+                className="p-6 text-center text-gray-500 italic"
+              >
+                Nincs megjeleníthető mérkőzés.
               </td>
             </tr>
-          ))}
+          ) : (
+            data.map((m) => (
+              <tr
+                key={m.id}
+                onClick={() => handleClick(m)}
+                className="border-t cursor-pointer hover:bg-gray-50 transition-colors"
+              >
+                <td className="p-3 font-medium">
+                  {m.title}
+                  {m.score && (
+                    <span className="ml-2 inline-block rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
+                      {m.score} ({m.winner})
+                    </span>
+                  )}
+                </td>
+
+                <td className="p-3 whitespace-nowrap">
+                  {m.date} {m.time}
+                </td>
+
+                <td className="p-3 whitespace-nowrap">
+                  {m.venue || "ETO Park Győr"}
+                </td>
+
+                {isClosed && (
+                  <td
+                    className="p-3 text-right whitespace-nowrap"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() =>
+                        window.open(
+                          `http://localhost:3000/api/matches/${m.id}/pdf`,
+                          "_blank"
+                        )
+                      }
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#2E7D32] hover:bg-[#256629] text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+                      title="PDF összefoglaló megnyitása új lapon"
+                    >
+                      <FileText size={14} />
+                      <span>PDF Megnyitása</span>
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>
@@ -803,7 +876,7 @@ function App() {
                     Megnyitott naplók
                   </h2>
 
-                  {renderTable(matches)}
+                  {renderTable(matches, false)}
                 </div>
 
                 {/* LEZÁRT NAPLÓK */}
@@ -822,7 +895,7 @@ function App() {
                     Lezárt de nem archivált
                   </h2>
 
-                  {renderTable(closed)}
+                  {renderTable(closed, true)}
                 </div>
 
                 {/* KÖVETKEZŐ MÉRKŐZÉSEK */}
@@ -841,7 +914,7 @@ function App() {
                     Következő mérkőzések
                   </h2>
 
-                  {renderTable(matches)}
+                  {renderTable(matches, false)}
                 </div>
 
               </>
@@ -853,7 +926,7 @@ function App() {
 
           {!selectedLog &&
             view === "upcoming" &&
-            renderTable(matches)}
+            renderTable(matches, false)}
 
           {/* =================================================
               LEZÁRT
@@ -861,7 +934,7 @@ function App() {
 
           {!selectedLog &&
             view === "closed" &&
-            renderTable(closed)}
+            renderTable(closed, true)}
 
           {/* =================================================
               ARCHIVÁLT
@@ -869,7 +942,7 @@ function App() {
 
           {!selectedLog &&
             view === "archived" &&
-            renderTable(archived)}
+            renderTable(archived, true)}
 
         </div>
       </div>
