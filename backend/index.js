@@ -1,33 +1,32 @@
 const express = require("express");
-const app = express();
 const cors = require("cors");
 const puppeteer = require("puppeteer");
 const nodemailer = require("nodemailer");
 const fs = require("fs");
 const path = require("path");
 const db = require("./db");
-
 const matchesData = require("./mock-data/matches.json");
 
+const app = express();
+const PORT = 3000;
 const MOCK_API_KEY = "mock-mlsz-key";
 
-// PDF tárolási könyvtár létrehozása ha nem létezik
-const pdfDir = path.join(__dirname, "public", "pdfs");
-if (!fs.existsSync(pdfDir)) {
-  fs.mkdirSync(pdfDir, { recursive: true });
-}
+app.use(cors());
+app.use(express.json({ limit: "2mb" }));
 
-// Logó beolvasása base64 formátumban a PDF-ekhez
+// Logó beolvasása base64 formátumban, hogy a PDF-ben mindig hibátlanul jelenjen meg
 let logoBase64 = "";
 const logoPath = path.join(__dirname, "public", "logo.png");
 if (fs.existsSync(logoPath)) {
-  logoBase64 = "data:image/png;base64," + fs.readFileSync(logoPath).toString("base64");
+  logoBase64 =
+    "data:image/png;base64," + fs.readFileSync(logoPath).toString("base64");
+} else {
+  console.warn("[PDF] Figyelmeztetés: A logó fájl nem található:", logoPath);
 }
 
 // =========================
 // GMAIL SMTP TRANSPORTER
 // =========================
-
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
@@ -36,230 +35,229 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-app.use(cors());
-app.use(express.json({ limit: "50mb" }));
-app.use("/public", express.static(path.join(__dirname, "public")));
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
-// =========================
-// Basic test route
-// =========================
-
-app.get("/", (req, res) => {
-  res.send("Backend is running");
-});
-
-// =========================
-// MOCK MLSZ API
-// =========================
-
-app.get("/api/mlsz/matches", (req, res) => {
-  const apiKey = req.headers["x-api-key"];
-
-  if (apiKey !== MOCK_API_KEY) {
-    return res.status(401).json({
-      error: "Invalid API key",
-    });
-  }
-
-  const { teamId } = req.query;
-
-  if (teamId) {
-    const filtered = matchesData.matches.filter(
-      (m) => m.teamId === parseInt(teamId, 10)
-    );
-    return res.json(filtered);
-  }
-
-  res.json(matchesData.matches);
-});
-
-app.get("/api/mlsz/matches/:id", (req, res) => {
-  const apiKey = req.headers["x-api-key"];
-
-  if (apiKey !== MOCK_API_KEY) {
-    return res.status(401).json({
-      error: "Invalid API key",
-    });
-  }
-
-  const matchId = parseInt(req.params.id, 10);
-  const match = matchesData.matches.find((m) => m.id === matchId);
-
-  if (!match) {
-    return res.status(404).json({
-      error: "Match not found",
-    });
-  }
-
-  res.json(match);
-});
-
-// =========================
-// MATCHES CRUD API (Postgres / In-Memory sync)
-// =========================
-
-app.get("/api/matches", async (req, res) => {
-  try {
-    const matches = await db.getMatches();
-    res.json(matches);
-  } catch (err) {
-    console.error("[API GET MATCHES HIBA]", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/matches/:id", async (req, res) => {
-  try {
-    const match = await db.getMatchById(req.params.id);
-    if (!match) {
-      return res.status(404).json({ error: "Match not found" });
+function formatPersonField(field, fallbackName = "", fallbackPhone = "") {
+  if (field && typeof field === "object") {
+    const first = field.name || field.organization || fallbackName || "";
+    const second = field.phone || field.person || fallbackPhone || "";
+    if (field.organization !== undefined || field.person !== undefined) {
+      if (first && second) return `${first} / ${second}`;
+      return first || second || "—";
     }
-    res.json(match);
-  } catch (err) {
-    console.error("[API GET MATCH BY ID HIBA]", err);
-    res.status(500).json({ error: err.message });
+    return `${first} ${second}`.trim() || "—";
   }
-});
+  const str = String(field || "").trim();
+  if (str) return str;
+  return `${fallbackName} ${fallbackPhone}`.trim() || "—";
+}
 
-app.put("/api/matches/:id", async (req, res) => {
-  try {
-    const matchId = Number(req.params.id);
-    const { status, score, winner } = req.body;
-    const updated = await db.updateMatch(matchId, { status, score, winner });
-    console.log(
-      `[DB MATCH FRISSÍTVE] Match #${matchId} -> status: ${status}, score: ${score}, winner: ${winner}`
-    );
-    res.json({ success: true, match: updated });
-  } catch (err) {
-    console.error("[API PUT MATCH HIBA]", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+function buildMatchPdfHtml(match, masterData = {}) {
+  const m = match || {};
+  const meta = m.meta && typeof m.meta === "object" ? m.meta : {};
 
-// ===================================
-// PDF GENERÁLÓ ÉS KISZOLGÁLÓ FÜGGVÉNYEK
-// ===================================
+  const titleParts = String(m.title || "").includes(" vs ")
+    ? String(m.title).split(" vs ").map((s) => s.trim())
+    : [];
+  const homeTeam = meta.homeTeam || m.homeTeam || titleParts[0] || "Hazai csapat";
+  const awayTeam = meta.awayTeam || m.awayTeam || titleParts[1] || "Vendég csapat";
+  const competitionName =
+    meta.competitionName || meta.competition || m.competition || "NB I";
+  const matchDate = meta.matchDate || m.date || "—";
+  const matchTime = meta.matchTime || meta.matchStartTime || m.time || "";
+  const dateTimeStr = `${matchDate} ${matchTime}`.trim() || "—";
 
-function buildStandaloneMatchPdfHtml(match, customHtml = null) {
-  if (customHtml) {
-    return `
-      <!DOCTYPE html>
-      <html lang="hu">
-      <head>
-        <meta charset="UTF-8" />
-        <title>${match?.title || "Eseménynapló"}</title>
-        <style>
-          @page { size: A4 portrait; margin: 12mm 15mm; }
-          body { font-family: "Times New Roman", Times, serif; margin: 0; padding: 0; color: #000000; background: #ffffff; }
-        </style>
-      </head>
-      <body>
-        ${customHtml}
-      </body>
-      </html>
-    `;
-  }
+  const organizer = meta.organizer || masterData.organizer || masterData.organization || "—";
+  const securityInfo = formatPersonField(
+    meta.securityOfficer,
+    meta.safetyOfficer || "",
+    ""
+  );
+  const headOrganizerInfo = formatPersonField(
+    meta.headOrganizer,
+    meta.chiefOrganizer || masterData.chiefOrganizer || "",
+    masterData.phone || ""
+  );
+  const eventLogLeader = meta.eventLogLeader || "—";
 
-  // Pontos kinézet a mintakép alapján
-  const title = match?.title || "RabaETO – Nem RábaETO";
-  const date = match?.date || "2026.04.12.";
-  const time = match?.time || "14.52";
-  const competition = match?.competition || "Mérkőzéselnevezés";
+  const medicalInfo = meta.medicalService
+    ? formatPersonField(meta.medicalService)
+    : meta.healthcareProvider || masterData.healthcareProvider || "—";
+
+  const disasterInfo = meta.disasterProtection
+    ? formatPersonField(meta.disasterProtection)
+    : meta.fireService || masterData.disasterProtectionProvider || "—";
+
+  const score = m.score || meta.score || "";
+  const winner = m.winner || meta.winner || "";
+  const events = Array.isArray(m.events) ? m.events : [];
+  const notes = Array.isArray(m.notes) ? m.notes : [];
+
+  const eventsRowsHtml =
+    events.length > 0
+      ? events
+          .map(
+            (ev, idx) => `
+          <tr>
+            <td style="text-align:center;">${escapeHtml(ev.sequenceNumber || idx + 1)}</td>
+            <td style="text-align:center;">${escapeHtml(ev.time || "—")}</td>
+            <td>${escapeHtml(ev.reporterName || "—")}</td>
+            <td>${escapeHtml(ev.eventDescription || ev.eventType || "—")}</td>
+            <td>${escapeHtml(ev.decisionMaker || "—")}</td>
+            <td>${escapeHtml(ev.actionResult || ev.actionType || "—")}</td>
+          </tr>
+        `
+          )
+          .join("")
+      : `
+        <tr>
+          <td colspan="6" style="text-align:center; padding: 14px; color: #555;">
+            A mérkőzés során rendkívüli esemény nem került rögzítésre.
+          </td>
+        </tr>
+      `;
+
+  const notesHtml =
+    notes.length > 0
+      ? `
+      <div class="notes-section">
+        <h2>Utólagos megjegyzések</h2>
+        <ul>
+          ${notes
+            .map(
+              (n) => `
+            <li>
+              <strong>${escapeHtml(n.createdBy || "Rendszer")}</strong>
+              <span class="note-date">(${escapeHtml(n.createdAt || "")})</span>:
+              ${escapeHtml(n.text)}
+            </li>
+          `
+            )
+            .join("")}
+        </ul>
+      </div>
+    `
+      : "";
 
   return `
     <!DOCTYPE html>
     <html lang="hu">
     <head>
       <meta charset="UTF-8" />
-      <title>Eseménynapló</title>
+      <title>Eseménynapló - ${escapeHtml(m.title || `${homeTeam} vs ${awayTeam}`)}</title>
       <style>
-        @page { size: A4 portrait; margin: 12mm 16mm; }
+        @page {
+          size: A4 portrait;
+          margin: 14mm 16mm 14mm 16mm;
+        }
+        * {
+          box-sizing: border-box;
+        }
         body {
           font-family: "Times New Roman", Times, serif;
-          margin: 0;
-          padding: 20px 25px;
           color: #000000;
-          background: #ffffff;
+          margin: 0;
+          padding: 0;
           font-size: 11pt;
           line-height: 1.35;
         }
         .header-container {
           position: relative;
-          min-height: 100px;
-          margin-bottom: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 88px;
+          margin-bottom: 18px;
         }
         .logo-box {
           position: absolute;
-          right: 0;
+          left: 0;
           top: 0;
         }
         .logo-box img {
-          height: 95px;
+          height: 84px;
           width: auto;
-          display: block;
-        }
-        .title-box {
-          text-align: center;
-          padding-top: 28px;
+          object-fit: contain;
         }
         .title-box h1 {
-          font-family: "Times New Roman", Times, serif;
-          font-size: 22pt;
-          font-weight: bold;
           margin: 0;
-          color: #000000;
+          font-size: 20pt;
+          font-weight: bold;
+          letter-spacing: 0.2px;
         }
         .meta-table {
           width: 100%;
           border-collapse: collapse;
-          margin-bottom: 30px;
-          font-family: "Times New Roman", Times, serif;
+          margin-bottom: 20px;
+        }
+        .meta-table td {
+          padding: 3px 6px 3px 0;
+          vertical-align: top;
           font-size: 11pt;
         }
         .meta-table td.label {
           width: 53%;
           font-weight: bold;
-          color: #000000;
-          padding: 3px 8px 3px 0;
-          vertical-align: top;
         }
         .meta-table td.value {
           width: 47%;
           font-weight: normal;
-          color: #000000;
-          padding: 3px 0;
-          vertical-align: top;
         }
         .events-table {
           width: 100%;
           border-collapse: collapse;
-          border-spacing: 0;
-          font-family: "Times New Roman", Times, serif;
           font-size: 10pt;
           border: 1.5px solid #000000;
         }
-        .events-table th {
+        .events-table thead tr {
           background-color: #DDE3EA;
+        }
+        .events-table th {
           border: 1px solid #000000;
           padding: 7px 6px;
           font-weight: bold;
-          color: #000000;
-          vertical-align: middle;
+          text-align: left;
+          vertical-align: top;
         }
         .events-table td {
           border: 1px solid #000000;
-          padding: 6px 8px;
-          color: #000000;
+          padding: 6px;
           vertical-align: top;
-          line-height: 1.3;
+          word-break: break-word;
         }
-        .text-center { text-align: center; }
-        .text-left { text-align: left; }
+        .notes-section {
+          margin-top: 22px;
+          border-top: 1px solid #888;
+          padding-top: 10px;
+          font-size: 10.5pt;
+        }
+        .notes-section h2 {
+          font-size: 12pt;
+          margin: 0 0 8px 0;
+        }
+        .notes-section ul {
+          margin: 0;
+          padding-left: 18px;
+        }
+        .notes-section li {
+          margin-bottom: 4px;
+        }
+        .note-date {
+          color: #444;
+          font-size: 9.5pt;
+        }
       </style>
     </head>
     <body>
       <div class="header-container">
-        ${logoBase64 ? `<div class="logo-box"><img src="${logoBase64}" alt="ETO Logo" /></div>` : ""}
+        ${logoBase64 ? `<div class="logo-box"><img src="${logoBase64}" alt="ETO Logó" /></div>` : ""}
         <div class="title-box">
           <h1>Eseménynapló</h1>
         </div>
@@ -269,48 +267,47 @@ function buildStandaloneMatchPdfHtml(match, customHtml = null) {
         <tbody>
           <tr>
             <td class="label">Versenyrendszer megnevezése:</td>
-            <td class="value">${competition}</td>
+            <td class="value">${escapeHtml(competitionName)}</td>
           </tr>
           <tr>
             <td class="label">Mérkőző csapatok megnevezése (hazai / vendég):</td>
-            <td class="value">${title}</td>
+            <td class="value">${escapeHtml(homeTeam)} - ${escapeHtml(awayTeam)}</td>
           </tr>
           <tr>
             <td class="label">Mérkőzés ideje:</td>
-            <td class="value">${date} ${time}</td>
+            <td class="value">${escapeHtml(dateTimeStr)}</td>
           </tr>
           <tr>
             <td class="label">Biztonsági felelős megnevezése és elérhetősége:</td>
-            <td class="value">Valaki 03635379</td>
+            <td class="value">${escapeHtml(securityInfo)}</td>
           </tr>
           <tr>
             <td class="label">Rendező vagy rendező szerv megnevezése:</td>
-            <td class="value">Szervező</td>
+            <td class="value">${escapeHtml(organizer)}</td>
           </tr>
           <tr>
             <td class="label">Főrendező megnevezése:</td>
-            <td class="value">Valaki2 03654892</td>
+            <td class="value">${escapeHtml(headOrganizerInfo)}</td>
           </tr>
           <tr>
             <td class="label">Eseménynaplót vezető megnevezése és elérhetősége:</td>
-            <td class="value">Valaki3</td>
+            <td class="value">${escapeHtml(eventLogLeader)}</td>
           </tr>
           <tr>
             <td class="label">Egészségügyi biztosításért felelős szervezet és személy:</td>
-            <td class="value">Szervezet – Személy</td>
+            <td class="value">${escapeHtml(medicalInfo)}</td>
           </tr>
           <tr>
             <td class="label">Katasztrófavédelmi biztosításért felelős szervezet és személy:</td>
-            <td class="value">Katasztrofavédelmisek – Valaki4</td>
+            <td class="value">${escapeHtml(disasterInfo)}</td>
           </tr>
           ${
-            match?.score
+            score || winner
               ? `
           <tr>
             <td class="label">Hivatalos végeredmény és győztes:</td>
-            <td class="value"><strong>${match.score}</strong> (Győztes: ${match.winner || "N/A"})</td>
-          </tr>
-          `
+            <td class="value"><strong>${escapeHtml(score || "N/A")}</strong> (Győztes: ${escapeHtml(winner || "N/A")})</td>
+          </tr>`
               : ""
           }
         </tbody>
@@ -319,49 +316,20 @@ function buildStandaloneMatchPdfHtml(match, customHtml = null) {
       <table class="events-table">
         <thead>
           <tr>
-            <th class="text-center" style="width: 45px;">SSZ</th>
-            <th class="text-center" style="width: 65px;">Időpont</th>
-            <th class="text-left" style="width: 125px;">Eseményt jelentő</th>
-            <th class="text-left">Esemény leírása</th>
-            <th class="text-left" style="width: 125px;">Intézkedést meghatározó</th>
-            <th class="text-left" style="width: 135px;">Intézkedés / eredmény</th>
+            <th style="width:40px; text-align:center;">SSZ</th>
+            <th style="width:55px; text-align:center;">Időpont</th>
+            <th style="width:118px;">Eseményt jelentő</th>
+            <th>Esemény leírása</th>
+            <th style="width:132px;">Intézkedést meghatározó</th>
+            <th style="width:130px;">Intézkedés / eredmény</th>
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td class="text-center">1</td>
-            <td class="text-center">14:55</td>
-            <td>Valaki5</td>
-            <td>Esemény leírása, hosszasan elemezve</td>
-            <td>Valaki5</td>
-            <td>Intézkedés eredménye</td>
-          </tr>
-          <tr>
-            <td class="text-center">2</td>
-            <td class="text-center">15:10</td>
-            <td>Valaki6</td>
-            <td>Esemény leírása</td>
-            <td>Valaki6</td>
-            <td>Intézkedés eredménye</td>
-          </tr>
-          <tr>
-            <td class="text-center">3</td>
-            <td class="text-center">15:42</td>
-            <td>Valaki7</td>
-            <td>Esemény leírása</td>
-            <td>Valaki7</td>
-            <td>Intézkedés eredménye</td>
-          </tr>
-          <tr>
-            <td class="text-center">4</td>
-            <td class="text-center">16:20</td>
-            <td>Valaki8</td>
-            <td>Esemény leírása</td>
-            <td>Valaki8</td>
-            <td>Intézkedés eredménye</td>
-          </tr>
+          ${eventsRowsHtml}
         </tbody>
       </table>
+
+      ${notesHtml}
     </body>
     </html>
   `;
@@ -398,246 +366,408 @@ async function renderPdfBuffer(html) {
   const browser = await puppeteer.launch(launchOptions);
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
-    const pdf = await page.pdf({
+    await page.setContent(html, { waitUntil: "load" });
+    return await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: { top: "15mm", right: "15mm", bottom: "15mm", left: "15mm" },
+      margin: {
+        top: "10mm",
+        right: "10mm",
+        bottom: "10mm",
+        left: "10mm",
+      },
     });
-    return pdf;
   } finally {
     await browser.close();
   }
 }
 
-// PDF elmentése és generálása egy adott meccshez
-app.post("/api/matches/:id/pdf", async (req, res) => {
+async function generateMatchPdfBuffer(matchId, fallbackMatchData = null) {
+  const dbMatch = await db.getMatchById(matchId);
+  const match = dbMatch || fallbackMatchData;
+  if (!match) return null;
+  const masterData = await db.getMasterData();
+  const html = buildMatchPdfHtml(match, masterData);
+  return {
+    match,
+    buffer: await renderPdfBuffer(html),
+  };
+}
+
+// =========================
+// MOCK MLSZ API
+// =========================
+app.get("/api/mlsz/matches", (req, res) => {
+  const apiKey = req.headers["x-api-key"];
+  if (apiKey !== MOCK_API_KEY) {
+    return res.status(401).json({ error: "Invalid or missing API key" });
+  }
+
+  let result = matchesData.matches;
+  const { teamId, competition, status } = req.query;
+
+  if (teamId) {
+    result = result.filter((m) => String(m.teamId) === String(teamId));
+  }
+  if (competition) {
+    result = result.filter(
+      (m) => m.competition.toLowerCase() === competition.toLowerCase()
+    );
+  }
+  if (status) {
+    result = result.filter((m) => m.status === status);
+  }
+
+  res.json({
+    source: "mock-mlsz-api",
+    count: result.length,
+    matches: result,
+  });
+});
+
+app.get("/api/mlsz/matches/:id", (req, res) => {
+  const apiKey = req.headers["x-api-key"];
+  if (apiKey !== MOCK_API_KEY) {
+    return res.status(401).json({ error: "Invalid or missing API key" });
+  }
+
+  const match = matchesData.matches.find((m) => String(m.id) === req.params.id);
+  if (!match) {
+    return res.status(404).json({ error: "Match not found" });
+  }
+  res.json(match);
+});
+
+// =========================
+// HITELESÍTÉS & FELHASZNÁLÓK
+// =========================
+app.post("/api/login", async (req, res) => {
   try {
-    const matchId = Number(req.params.id);
-    const { html } = req.body;
-    const match = await db.getMatchById(matchId);
-
-    const fullHtml = buildStandaloneMatchPdfHtml(match, html);
-    const pdfBuffer = await renderPdfBuffer(fullHtml);
-
-    const filePath = path.join(pdfDir, `match-${matchId}.pdf`);
-    fs.writeFileSync(filePath, pdfBuffer);
-
-    console.log(`[PDF SIKERESEN MENTVE] match-${matchId}.pdf`);
-    res.json({
-      success: true,
-      url: `/api/matches/${matchId}/pdf`,
-    });
+    const { username, password } = req.body;
+    const user = await db.findUser(username, password);
+    if (!user) {
+      return res.status(401).json({ error: "Hibás felhasználónév vagy jelszó." });
+    }
+    res.json({ user });
   } catch (err) {
-    console.error("[PDF GENERÁLÁSI HIBA]", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PDF letöltése vagy megnyitása böngészőből
-app.get("/api/matches/:id/pdf", async (req, res) => {
+app.get("/api/users", async (req, res) => {
   try {
-    const matchId = Number(req.params.id);
-    const filePath = path.join(pdfDir, `match-${matchId}.pdf`);
-
-    // Ha még nem létezik a fájl, generáljuk le gyorsan az adatbázis adatai alapján!
-    if (!fs.existsSync(filePath)) {
-      const match = await db.getMatchById(matchId);
-      if (!match) {
-        return res.status(404).send("A megadott mérkőzés nem található.");
-      }
-      const fullHtml = buildStandaloneMatchPdfHtml(match);
-      const pdfBuffer = await renderPdfBuffer(fullHtml);
-      fs.writeFileSync(filePath, pdfBuffer);
-    }
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="esemenynaplo-${matchId}.pdf"`
-    );
-    res.sendFile(filePath);
+    const users = await db.getUsers();
+    res.json(users);
   } catch (err) {
-    console.error("[PDF LETÖLTÉSI HIBA]", err);
-    res.status(500).send("Nem sikerült megnyitni a PDF összefoglalót: " + err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/users", async (req, res) => {
+  try {
+    const { username, name, email, phone, role, password } = req.body;
+    if (!username || !name) {
+      return res.status(400).json({ error: "Felhasználónév és név megadása kötelező." });
+    }
+    const created = await db.createUser({ username, name, email, phone, role, password });
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put("/api/users/:id", async (req, res) => {
+  try {
+    const updated = await db.updateUser(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ error: "Felhasználó nem található." });
+    }
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put("/api/users/:id/password", async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Mindkét jelszó mező kitöltése kötelező." });
+    }
+    const result = await db.updateUserPassword(
+      req.params.id,
+      currentPassword,
+      newPassword
+    );
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/users/:id", async (req, res) => {
+  try {
+    const result = await db.deleteUser(req.params.id);
+    if (!result.deleted) {
+      return res.status(404).json({ error: "Felhasználó nem található." });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // =========================
-// EMAIL NOTIFICATION (PDF Csatolmánnyal és Közvetlen Linkkel)
+// TÖRZSAADATOK (MASTER DATA)
 // =========================
-
-app.post("/api/send-email", async (req, res) => {
-  const { to, subject, message, matchId, result, html } = req.body;
-  const recipient = to || "szeconnect.projektmunka@gmail.com";
-
-  const logged = await db.logEmail({
-    to: recipient,
-    subject: subject || "Rába ETO Digitális Eseménynapló Értesítés",
-    message,
-    matchId,
-    result,
-  });
-
-  console.log(`[EMAIL DISPATCH] To: ${recipient} | Subject: ${subject}`);
-
-  // PDF előkészítése és mentése ha van matchId
-  let pdfAttachment = null;
-  if (matchId) {
-    try {
-      const match = await db.getMatchById(matchId);
-      const fullHtml = buildStandaloneMatchPdfHtml(match, html);
-      const pdfBuffer = await renderPdfBuffer(fullHtml);
-
-      // Elmentjük a szerverre is a közvetlen linkes eléréshez
-      const filePath = path.join(pdfDir, `match-${matchId}.pdf`);
-      fs.writeFileSync(filePath, pdfBuffer);
-
-      pdfAttachment = {
-        filename: `esemenynaplo-${matchId}.pdf`,
-        content: pdfBuffer,
-        contentType: "application/pdf",
-      };
-      console.log(`[EMAIL PDF CSATOLVA] match-${matchId}.pdf`);
-    } catch (pdfErr) {
-      console.warn("[EMAIL PDF GENERÁLÁS FIGYELMEZTETÉS]", pdfErr.message);
-    }
-  }
-
-  const pdfDirectUrl = matchId ? `http://localhost:3000/api/matches/${matchId}/pdf` : null;
-
+app.get("/api/master-data", async (req, res) => {
   try {
+    const data = await db.getMasterData();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/master-data", async (req, res) => {
+  try {
+    const updated = await db.updateMasterData(req.body);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =========================
+// MÉRKŐZÉSEK, ESEMÉNYEK, MEGJEGYZÉSEK
+// =========================
+app.get("/api/matches", async (req, res) => {
+  try {
+    const matches = await db.getMatches();
+    res.json(matches);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/matches/:id", async (req, res) => {
+  try {
+    const match = await db.getMatchById(req.params.id);
+    if (!match) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+    res.json(match);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/matches", async (req, res) => {
+  try {
+    const created = await db.createMatch(req.body);
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put("/api/matches/:id", async (req, res) => {
+  try {
+    const updated = await db.updateMatch(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/matches/:id/notes", async (req, res) => {
+  try {
+    const { text, createdBy } = req.body;
+    if (!text || !String(text).trim()) {
+      return res.status(400).json({ error: "A megjegyzés szövege nem lehet üres." });
+    }
+    const note = await db.addNote(req.params.id, { text, createdBy });
+    if (!note) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+    res.status(201).json(note);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =========================
+// PDF LETÖLTÉS / MEGTEKINTÉS ADATBÁZISBÓL
+// =========================
+app.get("/api/matches/:id/pdf", async (req, res) => {
+  try {
+    const matchId = req.params.id;
+    const isDownload = req.query.download === "1" || req.query.download === "true";
+
+    const result = await generateMatchPdfBuffer(matchId);
+    if (!result) {
+      return res.status(404).json({ error: "A kért mérkőzés nem található." });
+    }
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `${isDownload ? "attachment" : "inline"}; filename="esemenynaplo-${matchId}.pdf"`,
+      "Cache-Control": "no-store",
+    });
+    res.send(result.buffer);
+  } catch (err) {
+    console.error("[PDF] Generálási hiba:", err);
+    res.status(500).json({ error: "Hiba történt a PDF generálásakor." });
+  }
+});
+
+// =========================
+// E-MAIL KÜLDÉS (GMAIL SMTP + ADATBÁZIS-ALAPÚ PDF CSATOLMÁNY)
+// =========================
+app.post("/api/send-email", async (req, res) => {
+  try {
+    const { to, subject, message, matchId, result } = req.body;
+    const masterData = await db.getMasterData();
+    const recipient = to || masterData.reportEmail || "szeconnect.projektmunka@gmail.com";
+
+    const logged = await db.logEmail({
+      to: recipient,
+      subject,
+      message,
+      matchId,
+      result,
+      status: "sent",
+    });
+
+    const viewPdfUrl = matchId ? `http://localhost:${PORT}/api/matches/${matchId}/pdf` : null;
+    const downloadPdfUrl = matchId
+      ? `http://localhost:${PORT}/api/matches/${matchId}/pdf?download=1`
+      : null;
+
+    const attachments = [];
+    if (matchId) {
+      try {
+        const pdfData = await generateMatchPdfBuffer(matchId);
+        if (pdfData && pdfData.buffer) {
+          attachments.push({
+            filename: `esemenynaplo-${matchId}.pdf`,
+            content: pdfData.buffer,
+            contentType: "application/pdf",
+          });
+        }
+      } catch (pdfErr) {
+        console.warn("[EMAIL PDF] Nem sikerült a PDF csatolmány legenerálása:", pdfErr.message);
+      }
+    }
+
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; line-height: 1.5;">
+        <div style="background-color: #2E7D32; color: white; padding: 16px 20px; border-radius: 8px 8px 0 0;">
+          <h2 style="margin: 0; font-size: 18px;">Rába ETO Digitális Eseménynapló</h2>
+        </div>
+        <div style="padding: 20px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px;">
+          <p style="white-space: pre-line;">${escapeHtml(message || "")}</p>
+          ${
+            result
+              ? `
+            <div style="background-color: #f8f9fa; padding: 12px; border-left: 4px solid #2E7D32; margin: 16px 0;">
+              <strong>Hivatalos végeredmény:</strong> ${escapeHtml(result.score || "N/A")}<br/>
+              <strong>Győztes:</strong> ${escapeHtml(result.winner || "N/A")}
+            </div>
+          `
+              : ""
+          }
+          ${
+            viewPdfUrl
+              ? `
+            <div style="margin: 22px 0; text-align: center;">
+              <a href="${viewPdfUrl}" target="_blank" style="display: inline-block; background-color: #2E7D32; color: #ffffff; padding: 11px 18px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 4px;">
+                PDF Megtekintése
+              </a>
+              <a href="${downloadPdfUrl}" target="_blank" style="display: inline-block; background-color: #1F5B23; color: #ffffff; padding: 11px 18px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 4px;">
+                PDF Letöltése
+              </a>
+            </div>
+          `
+              : ""
+          }
+          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+          <p style="font-size: 12px; color: #666; margin: 0;">
+            A lezárt eseménynapló PDF formátumban ehhez az e-mailhez is csatolásra került.
+          </p>
+        </div>
+      </div>
+    `;
+
     const mailOptions = {
       from: {
         name: "Rába ETO Digitális Eseménynapló",
         address: "szeconnect.projektmunka@gmail.com",
       },
       to: recipient,
-      subject: subject || "Rába ETO Digitális Eseménynapló Értesítés",
-      text: message,
-      html: `
-        <!DOCTYPE html>
-        <html lang="hu">
-        <head>
-          <meta charset="UTF-8" />
-          <title>${subject || "Rába ETO Értesítés"}</title>
-        </head>
-        <body style="margin: 0; padding: 20px; font-family: Arial, sans-serif; background-color: #f9fafb;">
-          <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-            <div style="background-color: #2E7D32; color: #ffffff; padding: 18px 24px; text-align: center;">
-              <h2 style="margin: 0; font-size: 20px; font-weight: bold;">Rába ETO Digitális Eseménynapló</h2>
-            </div>
-            <div style="padding: 24px;">
-              <h3 style="color: #111827; margin-top: 0; font-size: 17px;">${subject || "Értesítés"}</h3>
-              <p style="white-space: pre-wrap; font-size: 14px; color: #374151; line-height: 1.6;">${message}</p>
-              ${
-                result
-                  ? `
-                <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; padding: 14px 18px; border-radius: 6px; margin-top: 18px;">
-                  <p style="margin: 0; font-weight: bold; color: #15803d; font-size: 16px;">Végeredmény: ${result.score}</p>
-                  <p style="margin: 4px 0 0 0; color: #374151; font-size: 14px;">Győztes: <strong>${result.winner}</strong></p>
-                </div>
-              `
-                  : ""
-              }
-
-              ${
-                pdfDirectUrl
-                  ? `
-                <div style="margin-top: 24px; padding: 16px; background-color: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; text-align: center;">
-                  <p style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #1e293b;">
-                    Hivatalos Eseménynapló Dokumentum (PDF)
-                  </p>
-                  <a href="${pdfDirectUrl}" target="_blank" style="display: inline-block; background-color: #2E7D32; color: #ffffff; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">
-                    📄 PDF Összefoglaló Megnyitása
-                  </a>
-                  <p style="margin: 8px 0 0 0; font-size: 12px; color: #64748b;">
-                    (A PDF fájl közvetlenül a levélhez is csatolva van)
-                  </p>
-                </div>
-              `
-                  : ""
-              }
-            </div>
-            <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 0 24px;" />
-            <div style="padding: 16px 24px; text-align: center;">
-              <p style="font-size: 12px; color: #9ca3af; margin: 0;">
-                Ez egy automatikus rendszerértesítés a Rába ETO Digitális Eseménynapló Rendszerből.
-              </p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
+      subject: subject || "Rába ETO Digitális Eseménynapló értesítés",
+      text: `${message || ""}\n\n${
+        result ? `Eredmény: ${result.score} (Győztes: ${result.winner})\n\n` : ""
+      }${viewPdfUrl ? `PDF megtekintése: ${viewPdfUrl}\nPDF letöltése: ${downloadPdfUrl}` : ""}`,
+      html: htmlBody,
+      attachments,
     };
 
-    if (pdfAttachment) {
-      mailOptions.attachments = [pdfAttachment];
-    }
-
     const info = await transporter.sendMail(mailOptions);
-
-    console.log(`[EMAIL SIKERESEN ELKÜLDVE] MessageId: ${info.messageId}`);
     res.json({
       success: true,
       message: "Email sent successfully via Gmail SMTP with PDF attachment",
       messageId: info.messageId,
       email: logged,
-      pdfUrl: pdfDirectUrl,
+      pdfUrl: viewPdfUrl,
+      downloadUrl: downloadPdfUrl,
     });
   } catch (err) {
-    console.error("[EMAIL KÜLDÉSI HIBA]", err);
+    console.error("[EMAIL HIBA] Gmail SMTP küldés sikertelen:", err);
     res.status(500).json({
       success: false,
+      message: "Failed to send email via Gmail",
       error: err.message,
-      email: logged,
     });
   }
 });
 
-app.get("/api/db/emails", async (req, res) => {
-  const emails = await db.getSentEmails();
-  res.json(emails);
+app.get("/api/sent-emails", async (req, res) => {
+  res.json(await db.getSentEmails());
 });
 
+// =========================
+// RENDSZER ÁLLAPOT
+// =========================
 app.get("/api/db/status", (req, res) => {
   res.json({
     connected: db.isPostgresConnected(),
     type: db.isPostgresConnected() ? "PostgreSQL" : "In-Memory Database",
-    host: process.env.DB_HOST || "localhost",
-    database: process.env.DB_NAME || "esemenynaplodigit",
   });
 });
 
-app.get("/api/users", async (req, res) => {
+app.get("/health", async (req, res) => {
   const users = await db.getUsers();
-  res.json(users);
+  res.json({
+    status: "ok",
+    dbConnected: db.isPostgresConnected(),
+    usersCount: users.length,
+    mlszMockMatchesCount: matchesData.matches.length,
+  });
 });
 
-// Régi közvetlen generálás kompatibilitásként megőrizve
-app.post("/generate-pdf", async (req, res) => {
-  try {
-    const { html } = req.body;
-    if (!html) {
-      return res.status(400).send("Missing HTML content");
-    }
-
-    const pdf = await renderPdfBuffer(html);
-    res.set({
-      "Content-Type": "application/pdf",
-      "Content-Disposition": "attachment; filename=esemenynaplo.pdf",
-    });
-    res.send(pdf);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("PDF generation failed");
-  }
-});
-
-// =========================
-// START SERVER
-// =========================
-
-app.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
+db.ready().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Backend listening on port ${PORT} (http://localhost:${PORT})`);
+    console.log(`Mock MLSZ API: http://localhost:${PORT}/api/mlsz/matches`);
+    console.log(
+      `Adatbázis állapot: ${db.isPostgresConnected() ? "PostgreSQL aktív" : "In-Memory fallback"}`
+    );
+  });
 });

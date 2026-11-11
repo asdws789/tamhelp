@@ -1,5 +1,4 @@
-// inMemoryDb.js
-// Memóriában futó teszt adatbázis (In-Memory Database)
+// Frontend in-memory fallback adatbázis, ha a backend szerver átmenetileg nem elérhető.
 
 export const inMemoryDb = {
   users: [
@@ -33,11 +32,15 @@ export const inMemoryDb = {
   ],
 
   masterData: {
+    id: 1,
     organization: "Rába ETO SE Győr",
     officialEmail: "szeconnect.projektmunka@gmail.com",
+    organizationEmail: "szeconnect.projektmunka@gmail.com",
     reportEmail: "szeconnect.projektmunka@gmail.com",
     phone: "+36 96 123 456",
+    organizationPhone: "+36 96 123 456",
     address: "9027 Győr, ETO Park",
+    organizationAddress: "9027 Győr, ETO Park",
     organizer: "Rába ETO SE Győr",
     chiefOrganizer: "Főnév Sándor",
     healthcareProvider: "ETO Egészségügyi Partner Kft.",
@@ -48,29 +51,59 @@ export const inMemoryDb = {
     {
       id: 1,
       title: "CSAPAT 2 vs ETO",
-      date: "2026. 10. 28.",
-      time: "11:00",
+      date: "2026. 11. 18.",
+      time: "17:00",
       venue: "ETO Park",
       status: "in_progress",
+      score: null,
+      winner: null,
+      meta: {
+        competitionName: "NB I",
+        homeTeam: "CSAPAT 2",
+        awayTeam: "ETO",
+        matchDate: "2026. 11. 18.",
+        matchTime: "17:00",
+      },
       events: [],
+      notes: [],
     },
     {
       id: 6,
       title: "CSAPAT 3 vs ETO",
-      date: "2026. 10. 27.",
-      time: "10:00",
+      date: "2026. 11. 25.",
+      time: "18:00",
       venue: "ETO Park",
       status: "in_progress",
+      score: null,
+      winner: null,
+      meta: {
+        competitionName: "Magyar Kupa",
+        homeTeam: "CSAPAT 3",
+        awayTeam: "ETO",
+        matchDate: "2026. 11. 25.",
+        matchTime: "18:00",
+      },
       events: [],
+      notes: [],
     },
     {
       id: 7,
       title: "CSAPAT 4 vs ETO",
-      date: "2026. 11. 15.",
+      date: "2026. 12. 02.",
       time: "16:00",
       venue: "ETO Park",
       status: "in_progress",
+      score: null,
+      winner: null,
+      meta: {
+        competitionName: "NB I",
+        homeTeam: "CSAPAT 4",
+        awayTeam: "ETO",
+        matchDate: "2026. 12. 02.",
+        matchTime: "16:00",
+      },
       events: [],
+      notes: [],
     },
     {
       id: 3,
@@ -81,6 +114,25 @@ export const inMemoryDb = {
       status: "finalized",
       score: "0 - 3",
       winner: "ETO",
+      meta: {
+        competitionName: "NB I",
+        homeTeam: "CSAPAT 1",
+        awayTeam: "ETO",
+        matchDate: "2026. 10. 20.",
+        matchTime: "14:50",
+        score: "0 - 3",
+        winner: "ETO",
+      },
+      events: [],
+      notes: [
+        {
+          id: 1,
+          matchId: 3,
+          text: "A mérkőzés rendben lezajlott, utólagos jegyzőkönyvi kiegészítés szükséges a 2-es kapu forgalmáról.",
+          createdBy: "Biztonsági vezető",
+          createdAt: "2026. 10. 20. 17:15",
+        },
+      ],
     },
     {
       id: 4,
@@ -91,20 +143,43 @@ export const inMemoryDb = {
       status: "archived",
       score: "2 - 2",
       winner: "Döntetlen",
+      meta: {
+        competitionName: "NB I",
+        homeTeam: "CSAPAT 5",
+        awayTeam: "ETO",
+        matchDate: "2026. 09. 15.",
+        matchTime: "14:50",
+        score: "2 - 2",
+        winner: "Döntetlen",
+      },
+      events: [],
+      notes: [
+        {
+          id: 2,
+          matchId: 4,
+          text: "Archiválva a hatósági ellenőrzést követően.",
+          createdBy: "Adminisztrátor",
+          createdAt: "2026. 09. 16. 09:30",
+        },
+      ],
     },
   ],
 
   sentEmails: [],
 
-  // Adatbázis műveletek
   getUsers() {
-    return this.users;
+    return this.users.map(({ password, ...u }) => u);
   },
 
   findUser(username, password) {
-    return this.users.find(
-      (u) => u.username === username && u.password === password
+    const user = this.users.find(
+      (u) =>
+        u.username.toLowerCase() === String(username || "").trim().toLowerCase() &&
+        u.password === password
     );
+    if (!user) return null;
+    const { password: _, ...safeUser } = user;
+    return safeUser;
   },
 
   getMatches() {
@@ -112,30 +187,21 @@ export const inMemoryDb = {
   },
 
   updateMatch(id, data) {
-    const match = this.matches.find((m) => String(m.id) === String(id));
-    if (match) {
-      Object.assign(match, data);
+    const idx = this.matches.findIndex((m) => String(m.id) === String(id));
+    if (idx !== -1) {
+      this.matches[idx] = { ...this.matches[idx], ...data };
+      return this.matches[idx];
     }
-    return match;
-  },
-
-  getMasterData() {
-    return this.masterData;
+    return null;
   },
 
   logEmail(emailRecord) {
     const record = {
       id: Date.now(),
-      timestamp: new Date().toISOString(),
-      status: "Elküldve",
       ...emailRecord,
+      timestamp: new Date().toISOString(),
     };
-    this.sentEmails.push(record);
-    console.log("[IN-MEMORY DB] E-mail rögzítve:", record);
+    this.sentEmails.unshift(record);
     return record;
-  },
-
-  getSentEmails() {
-    return this.sentEmails;
   },
 };

@@ -11,12 +11,9 @@ import {
   eventRows,
 } from "../data/EventLogData";
 import {
-  isMatchOlderThan12Hours,
   fetchMatchResultFromMockApi,
   sendEventLogClosedEmail,
 } from "../data/mockMlszApi";
-
-const CURRENT_USER = "Felhasználó";
 
 const CUSTOM_VALUE = "__custom__";
 
@@ -193,6 +190,7 @@ function PersonSelector({
   nameField,
   modeField,
   placeholder,
+  currentUserName = "Felhasználó",
 }) {
   const hasEvent = Boolean(event.eventType);
 
@@ -203,7 +201,7 @@ function PersonSelector({
     updateEvent(
       index,
       nameField,
-      hasEvent ? CURRENT_USER : ""
+      hasEvent ? currentUserName : ""
     );
 
     updateEvent(
@@ -282,8 +280,8 @@ function PersonSelector({
     <select
       value={
         hasEvent &&
-        event[nameField] === CURRENT_USER
-          ? CURRENT_USER
+        event[nameField] === currentUserName
+          ? currentUserName
           : ""
       }
       onChange={(eventObject) => {
@@ -321,8 +319,8 @@ function PersonSelector({
       </option>
 
       {hasEvent && (
-        <option value={CURRENT_USER}>
-          {CURRENT_USER}
+        <option value={currentUserName}>
+          {currentUserName}
         </option>
       )}
 
@@ -540,6 +538,7 @@ function EventRow({
   index,
   updateEvent,
   deleteEvent,
+  currentUserName,
 }) {
   return (
     <tr className="align-top">
@@ -602,6 +601,7 @@ function EventRow({
           nameField="reporterName"
           modeField="reporterMode"
           placeholder="Kitöltő neve..."
+          currentUserName={currentUserName}
         />
       </td>
 
@@ -709,6 +709,7 @@ function EventRow({
           nameField="decisionMaker"
           modeField="decisionMakerMode"
           placeholder="Intézkedést meghatározó személy neve..."
+          currentUserName={currentUserName}
         />
       </td>
 
@@ -852,6 +853,7 @@ function EventCard({
   index,
   updateEvent,
   deleteEvent,
+  currentUserName,
 }) {
   return (
     <div
@@ -953,6 +955,7 @@ function EventCard({
           nameField="reporterName"
           modeField="reporterMode"
           placeholder="Kitöltő neve..."
+          currentUserName={currentUserName}
         />
       </MobileField>
 
@@ -1037,6 +1040,7 @@ function EventCard({
           nameField="decisionMaker"
           modeField="decisionMakerMode"
           placeholder="Személy neve..."
+          currentUserName={currentUserName}
         />
       </MobileField>
 
@@ -1163,103 +1167,123 @@ function MobileField({
    FŐ KOMPONENS
    ============================================================ */
 
+function buildMetaFromMatch(match, masterData) {
+  const savedMeta =
+    match?.meta && typeof match.meta === "object" ? match.meta : {};
+
+  const defaultHome = match?.title?.includes(" vs ")
+    ? match.title.split(" vs ")[0].trim()
+    : match?.homeTeam || eventMeta.homeTeam;
+  const defaultAway = match?.title?.includes(" vs ")
+    ? match.title.split(" vs ")[1].trim()
+    : match?.awayTeam || eventMeta.awayTeam;
+
+  return {
+    ...eventMeta,
+    competitionName:
+      savedMeta.competitionName ||
+      savedMeta.competition ||
+      match?.competition ||
+      match?.title ||
+      eventMeta.competitionName,
+    homeTeam: savedMeta.homeTeam || defaultHome,
+    awayTeam: savedMeta.awayTeam || defaultAway,
+    matchDate: savedMeta.matchDate || match?.date || eventMeta.matchDate,
+    matchTime: savedMeta.matchTime || match?.time || eventMeta.matchTime,
+    venue: savedMeta.venue || match?.venue || "",
+    organizer:
+      savedMeta.organizer ||
+      masterData?.organizer ||
+      masterData?.organization ||
+      eventMeta.organizer,
+    eventLogLeader:
+      savedMeta.eventLogLeader || eventMeta.eventLogLeader || "",
+    winner: savedMeta.winner || match?.winner || "",
+    score: savedMeta.score || match?.score || "",
+    securityOfficer: {
+      name:
+        savedMeta.securityOfficer?.name ??
+        eventMeta.securityOfficer?.name ??
+        "",
+      phone:
+        savedMeta.securityOfficer?.phone ??
+        eventMeta.securityOfficer?.phone ??
+        "",
+    },
+    headOrganizer: {
+      name:
+        savedMeta.headOrganizer?.name ??
+        masterData?.chiefOrganizer ??
+        eventMeta.headOrganizer?.name ??
+        "",
+      phone:
+        savedMeta.headOrganizer?.phone ??
+        masterData?.phone ??
+        eventMeta.headOrganizer?.phone ??
+        "",
+    },
+    medicalService: {
+      organization:
+        savedMeta.medicalService?.organization ??
+        masterData?.healthcareProvider ??
+        eventMeta.medicalService?.organization ??
+        "",
+      person:
+        savedMeta.medicalService?.person ??
+        eventMeta.medicalService?.person ??
+        "",
+    },
+    disasterProtection: {
+      organization:
+        savedMeta.disasterProtection?.organization ??
+        masterData?.disasterProtectionProvider ??
+        eventMeta.disasterProtection?.organization ??
+        "",
+      person:
+        savedMeta.disasterProtection?.person ??
+        eventMeta.disasterProtection?.person ??
+        "",
+    },
+  };
+}
+
 function EventLogEditor({
   match,
   eventLogStatus = "in_progress",
   currentUser,
+  masterData,
   onBack,
   onStatusChange,
+  onSaveMatch,
+  onNoteAdded,
   onFinalizeMatch,
+  onArchiveMatch,
 }) {
+  const activeUserName =
+    currentUser?.name || currentUser?.username || "Biztonsági vezető";
+
   const [status, setStatus] = useState(
     () => match?.status || eventLogStatus || "in_progress"
   );
 
-  // Sync status if match changes
-  useEffect(() => {
-    if (match?.status && match.status !== status) {
-      setStatus(match.status);
-    }
-  }, [match?.status]);
-
-  /* ==========================================================
-     META
-     ========================================================== */
-
-  const [meta, setMeta] = useState(() => {
-    const defaultHome = match?.title?.includes(" vs ")
-      ? match.title.split(" vs ")[0].trim()
-      : match?.homeTeam || eventMeta.homeTeam;
-    const defaultAway = match?.title?.includes(" vs ")
-      ? match.title.split(" vs ")[1].trim()
-      : match?.awayTeam || eventMeta.awayTeam;
-
-    return {
-      ...eventMeta,
-      competitionName:
-        match?.competition || match?.title || eventMeta.competitionName,
-      homeTeam: defaultHome,
-      awayTeam: defaultAway,
-      matchDate: match?.date || eventMeta.matchDate,
-      matchTime: match?.time || eventMeta.matchTime,
-      winner: match?.winner || "",
-      score: match?.score || "",
-
-      securityOfficer: {
-        ...(eventMeta.securityOfficer || {}),
-      },
-
-      headOrganizer: {
-        ...(eventMeta.headOrganizer || {}),
-      },
-
-      medicalService: {
-        ...(eventMeta.medicalService || {}),
-      },
-
-      disasterProtection: {
-        ...(eventMeta.disasterProtection || {}),
-      },
-    };
-  });
-
-  /* ==========================================================
-     ESEMÉNYEK
-     Követelmény: A megnyitott eseménynaplónál ne legyen kitöltve a táblázat,
-     csak legyen az opció hogy esemény hozzáadása, a többi legyen üresen, kitöltésre várva.
-     ========================================================== */
+  const [meta, setMeta] = useState(() => buildMetaFromMatch(match, masterData));
 
   const [events, setEvents] = useState(() => {
-    if (match?.events && match.events.length > 0) {
+    if (Array.isArray(match?.events) && match.events.length > 0) {
       return match.events.map((event) => normalizeEvent(event));
     }
-    const currentStatus = match?.status || eventLogStatus || "in_progress";
-    if (currentStatus === "in_progress") {
-      return [];
-    }
-    return (eventRows || []).map((event) => normalizeEvent(event));
+    return [];
   });
 
-  /* ==========================================================
-     MEGJEGYZÉSEK
-     ========================================================== */
-
-  const [notes, setNotes] = useState([
-    {
-      id: 1,
-      text: "Teszt megjegyzés.",
-      createdAt: "2026-03-10 09:15",
-      createdBy: "Teszt Elek",
-    },
-  ]);
+  const [notes, setNotes] = useState(() =>
+    Array.isArray(match?.notes) ? match.notes : []
+  );
 
   const [newNote, setNewNote] = useState("");
-
-  const [generatedPdfUrl, setGeneratedPdfUrl] = useState(null);
-
-  const pdfContentRef = useRef(null);
-
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
 
   /* ==========================================================
      VÉGLEGESÍTŐ MODAL ÉS ÉRTESÍTÉSEK
@@ -1270,7 +1294,30 @@ function EventLogEditor({
   const [modalScore, setModalScore] = useState("");
   const [modalError, setModalError] = useState("");
   const [emailNotification, setEmailNotification] = useState(null);
-  const [autoCloseNotification, setAutoCloseNotification] = useState(null);
+  const [saveFeedback, setSaveFeedback] = useState(null);
+
+  // Sync local state when a different match is opened or updated from DB
+  useEffect(() => {
+    if (!match) return;
+    setStatus(match.status || eventLogStatus || "in_progress");
+    setMeta(buildMetaFromMatch(match, masterData));
+    setEvents(
+      Array.isArray(match.events)
+        ? match.events.map((event) => normalizeEvent(event))
+        : []
+    );
+    setNotes(Array.isArray(match.notes) ? match.notes : []);
+    setSaveFeedback(null);
+  }, [match?.id]);
+
+  useEffect(() => {
+    if (match?.status && match.status !== status) {
+      setStatus(match.status);
+    }
+    if (Array.isArray(match?.notes)) {
+      setNotes(match.notes);
+    }
+  }, [match?.status, match?.notes]);
 
   /* ==========================================================
      APP STÁTUSZ SZINKRONIZÁLÁSA
@@ -1281,76 +1328,6 @@ function EventLogEditor({
       onStatusChange(status);
     }
   }, [status, onStatusChange]);
-
-  /* ==========================================================
-     AUTOMATIKUS LEZÁRÁS (12 ÓRÁVAL A MECCS UTÁN)
-     Mock API-n keresztül szerezve meg az eredményt
-     ========================================================== */
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function checkAutoClose() {
-      if (status === "in_progress" && isMatchOlderThan12Hours(match)) {
-        console.log(
-          `[EventLogEditor] Match ${match?.id} is > 12h past start. Auto-closing...`
-        );
-        const result = await fetchMatchResultFromMockApi(match?.id);
-        if (isCancelled) return;
-
-        const autoResult = {
-          winner: result?.winner || "Ismeretlen",
-          score: result?.score || "N/A",
-          isAuto: true,
-        };
-
-        setStatus("finalized");
-        setMeta((prev) => ({
-          ...prev,
-          winner: autoResult.winner,
-          score: autoResult.score,
-        }));
-
-        sendEventLogClosedEmail({
-          match,
-          result: autoResult,
-          currentUserEmail: currentUser?.email || "user1@eto.hu",
-        }).then(() => {
-          if (!isCancelled) {
-            setEmailNotification(
-              "📧 Értesítő e-mail automatikusan elküldve a profilban megadott címre (esemenynaplo@eto.hu)."
-            );
-          }
-        });
-
-        setAutoCloseNotification(
-          `A mérkőzés kezdete óta eltelt legalább 12 óra. Az eseménynapló automatikusan lezárásra került a Mock MLSZ API eredménye alapján. Végeredmény: ${autoResult.score} (Győztes: ${autoResult.winner})`
-        );
-
-        if (typeof onFinalizeMatch === "function") {
-          onFinalizeMatch(match?.id, autoResult);
-        }
-      }
-    }
-
-    checkAutoClose();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [match, status, currentUser, onFinalizeMatch]);
-
-  /* ==========================================================
-     PDF OBJECT URL TAKARÍTÁSA
-     ========================================================== */
-
-  useEffect(() => {
-    return () => {
-      if (generatedPdfUrl) {
-        window.URL.revokeObjectURL(generatedPdfUrl);
-      }
-    };
-  }, [generatedPdfUrl]);
 
   /* ==========================================================
      STÁTUSZ
@@ -1459,7 +1436,7 @@ function EventLogEditor({
               "custom"
             ) {
               updatedEvent.reporterName =
-                CURRENT_USER;
+                activeUserName;
 
               updatedEvent.reporterMode =
                 "current_user";
@@ -1470,14 +1447,14 @@ function EventLogEditor({
               "custom"
             ) {
               updatedEvent.decisionMaker =
-                CURRENT_USER;
+                activeUserName;
 
               updatedEvent.decisionMakerMode =
                 "current_user";
             }
 
             updatedEvent.createdBy =
-              CURRENT_USER;
+              activeUserName;
 
             updatedEvent.createdAt =
               now.iso;
@@ -1514,48 +1491,113 @@ function EventLogEditor({
      MEGJEGYZÉS HOZZÁADÁSA
      ========================================================== */
 
-  const addNote = () => {
-    if (!isFinalized) return;
+  const addNote = async () => {
+    if (!isFinalized || isSavingNote) return;
 
-    const text =
-      newNote.trim();
-
+    const text = newNote.trim();
     if (!text) return;
 
-    setNotes((previous) => [
-      ...previous,
-      {
-        id: Date.now(),
-        text,
-        createdAt:
-          new Date().toLocaleString(
-            "hu-HU"
-          ),
-        createdBy:
-          CURRENT_USER,
-      },
-    ]);
+    setIsSavingNote(true);
+    try {
+      const res = await fetch(
+        `http://localhost:3000/api/matches/${match?.id}/notes`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text,
+            createdBy: activeUserName,
+          }),
+        }
+      );
 
-    setNewNote("");
+      if (res.ok) {
+        const savedNote = await res.json();
+        setNotes((previous) => [...previous, savedNote]);
+        if (typeof onNoteAdded === "function") {
+          onNoteAdded(match?.id, savedNote);
+        }
+        setNewNote("");
+        setSaveFeedback({
+          type: "success",
+          text: "A megjegyzés sikeresen elmentve az adatbázisba.",
+        });
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      const localNote = {
+        id: Date.now(),
+        matchId: match?.id,
+        text,
+        createdAt: new Date().toLocaleString("hu-HU"),
+        createdBy: activeUserName,
+      };
+      setNotes((previous) => [...previous, localNote]);
+      if (typeof onNoteAdded === "function") {
+        onNoteAdded(match?.id, localNote);
+      }
+      setNewNote("");
+      setSaveFeedback({
+        type: "warning",
+        text: `Megjegyzés helyben mentve (adatbázis hiba: ${err.message}).`,
+      });
+    } finally {
+      setIsSavingNote(false);
+    }
   };
 
   /* ==========================================================
      ESEMÉNYNAPLÓ MENTÉSE
      ========================================================== */
 
-  const handleSave = () => {
-    if (!isEditable) return;
+  const handleSave = async () => {
+    if (!isEditable || isSaving) return;
+    setIsSaving(true);
+    setSaveFeedback(null);
 
-    const data = {
+    const payload = {
       meta,
       events,
-      status,
+      date: meta.matchDate || match?.date,
+      time: meta.matchTime || match?.time,
+      venue: meta.venue || match?.venue,
+      title:
+        meta.homeTeam && meta.awayTeam
+          ? `${meta.homeTeam} vs ${meta.awayTeam}`
+          : match?.title,
     };
 
-    console.log(
-      "Eseménynapló mentve:",
-      data
-    );
+    try {
+      const res = await fetch(
+        `http://localhost:3000/api/matches/${match?.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (res.ok) {
+        const updatedMatch = await res.json();
+        if (typeof onSaveMatch === "function") {
+          onSaveMatch(updatedMatch);
+        }
+        setSaveFeedback({
+          type: "success",
+          text: "Az eseménynapló adatai sikeresen mentésre kerültek az adatbázisba!",
+        });
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      setSaveFeedback({
+        type: "warning",
+        text: `Hiba a mentés során: ${err.message}`,
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   /* ==========================================================
@@ -1565,11 +1607,22 @@ function EventLogEditor({
      és mi a végeredmény.
      ========================================================== */
 
-  const handleOpenFinalizeModal = () => {
-    if (!isEditable || isGeneratingPdf) return;
-    setModalWinner(meta.homeTeam || "");
-    setModalScore("");
+  const handleOpenFinalizeModal = async () => {
+    if (!isEditable || isFinalizing) return;
     setModalError("");
+    let defaultWinner = meta.homeTeam || "";
+    let defaultScore = "";
+
+    const apiMatch = await fetchMatchResultFromMockApi(match?.id).catch(
+      () => null
+    );
+    if (apiMatch?.score && apiMatch?.winner) {
+      defaultScore = apiMatch.score;
+      defaultWinner = apiMatch.winner;
+    }
+
+    setModalWinner(defaultWinner);
+    setModalScore(defaultScore);
     setShowFinalizeModal(true);
   };
 
@@ -1589,64 +1642,48 @@ function EventLogEditor({
       isAuto: false,
     };
 
-    setShowFinalizeModal(false);
-
-    setMeta((prev) => ({
-      ...prev,
+    const nextMeta = {
+      ...meta,
       winner: finalResult.winner,
       score: finalResult.score,
-    }));
+    };
 
+    setIsFinalizing(true);
+    setShowFinalizeModal(false);
+    setMeta(nextMeta);
     setStatus("finalized");
 
-    const htmlContent = pdfContentRef.current ? pdfContentRef.current.innerHTML : null;
+    if (typeof onFinalizeMatch === "function") {
+      await onFinalizeMatch(match?.id, {
+        ...finalResult,
+        meta: nextMeta,
+        events,
+      });
+    }
 
-    // Requirement 3: E-mail küldés lezáráskor (PDF csatolmánnyal és közvetlen linkkel)
-    await sendEventLogClosedEmail({
-      match,
+    const emailRes = await sendEventLogClosedEmail({
+      match: { ...match, title: `${nextMeta.homeTeam} vs ${nextMeta.awayTeam}`, date: nextMeta.matchDate, time: nextMeta.matchTime },
       result: finalResult,
-      currentUserEmail: currentUser?.email || "user1@eto.hu",
-      html: htmlContent,
+      recipientEmail: masterData?.reportEmail || "szeconnect.projektmunka@gmail.com",
+      reason: "manual",
     });
 
-    // Szerveroldali PDF tárolása és frissítése
-    if (htmlContent && match?.id) {
-      fetch(`http://localhost:3000/api/matches/${match.id}/pdf`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: htmlContent }),
-      }).catch((err) => console.warn("PDF tárolási hiba:", err));
-    }
-
     setEmailNotification(
-      `📧 Értesítő e-mail sikeresen elküldve a profilban megadott címre PDF csatolmánnyal!`
+      emailRes?.ok === false
+        ? `Lezárás mentve, de az e-mail küldés sikertelen volt (${emailRes.error}).`
+        : "📧 Értesítő e-mail sikeresen elküldve a törzsadatokban megadott címre PDF csatolmánnyal!"
     );
+    setIsFinalizing(false);
+  };
 
-    if (typeof onFinalizeMatch === "function") {
-      onFinalizeMatch(match?.id, finalResult);
+  const handleArchive = async () => {
+    if (!isFinalized || isArchiving) return;
+    setIsArchiving(true);
+    if (typeof onArchiveMatch === "function") {
+      await onArchiveMatch(match?.id);
     }
-
-    // PDF generálás háttérben kísérlet
-    if (pdfContentRef.current) {
-      try {
-        const html = pdfContentRef.current.innerHTML;
-        const res = await fetch("http://localhost:3000/generate-pdf", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html }),
-        });
-        if (res.ok) {
-          const blob = await res.blob();
-          const url = window.URL.createObjectURL(blob);
-          if (generatedPdfUrl) {
-            window.URL.revokeObjectURL(generatedPdfUrl);
-          }
-          setGeneratedPdfUrl(url);
-        }
-      } catch (err) {
-        console.warn("PDF háttérben történő generálása nem sikerült.", err);
-      }
-    }
+    setStatus("archived");
+    setIsArchiving(false);
   };
 
   /* ==========================================================
@@ -1731,6 +1768,7 @@ function EventLogEditor({
             )}
 
             <button
+              type="button"
               onClick={() =>
                 window.open(
                   `http://localhost:3000/api/matches/${match?.id}/pdf`,
@@ -1740,26 +1778,53 @@ function EventLogEditor({
               className="inline-flex items-center gap-2 rounded-xl bg-[#2E7D32] hover:bg-[#256629] px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all cursor-pointer"
               title="PDF összefoglaló megnyitása új lapon"
             >
-              📄 <span>PDF Összefoglaló Megnyitása</span>
+              <span>PDF Megtekintése</span>
             </button>
+
+            <a
+              href={`http://localhost:3000/api/matches/${match?.id}/pdf?download=1`}
+              download={`esemenynaplo-${match?.id}.pdf`}
+              className="inline-flex items-center gap-2 rounded-xl bg-neutral-800 hover:bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all cursor-pointer"
+              title="PDF összefoglaló letöltése"
+            >
+              <span>PDF Letöltése</span>
+            </a>
+
+            {isFinalized && (
+              <button
+                type="button"
+                onClick={handleArchive}
+                disabled={isArchiving}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#C19A5B] hover:bg-[#b08a4c] px-4 py-2.5 text-sm font-semibold text-black shadow-md transition-all cursor-pointer disabled:opacity-60"
+                title="Eseménynapló archiválása"
+              >
+                <span>{isArchiving ? "Archiválás..." : "Archiválás"}</span>
+              </button>
+            )}
           </div>
         </div>
 
         {/* Értesítési sávok */}
-        {autoCloseNotification && (
-          <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-            ℹ️ {autoCloseNotification}
-          </div>
-        )}
-
         {emailNotification && (
           <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
             {emailNotification}
           </div>
         )}
 
+        {saveFeedback && (
+          <div
+            className={`mb-4 rounded-xl border p-4 text-sm ${
+              saveFeedback.type === "success"
+                ? "border-green-200 bg-green-50 text-green-900"
+                : "border-amber-200 bg-amber-50 text-amber-900"
+            }`}
+          >
+            {saveFeedback.text}
+          </div>
+        )}
+
         {/* ====================================================
-            DOKUMENTUM / PDF (LEZÁRT NAPLÓ: CSAK OLVASHATÓ)
+            DOKUMENTUM / PDF ELŐNÉZET (CSAK OLVASHATÓ)
            ==================================================== */}
 
         <div
@@ -1769,25 +1834,12 @@ function EventLogEditor({
             rounded-[8px]
             border
             border-[#d9dee7]
-            bg-[#525659]
+            bg-white
           "
         >
-          {generatedPdfUrl ? (
-            <iframe
-              src={generatedPdfUrl}
-              title="Eseménynapló PDF"
-              className="
-                block
-                h-[85vh]
-                w-full
-                border-0
-              "
-            />
-          ) : (
-            <div className="bg-white p-6 sm:p-10 overflow-x-auto text-black">
-              <EventLogDocument meta={meta} rows={events} />
-            </div>
-          )}
+          <div className="bg-white p-6 sm:p-10 overflow-x-auto text-black">
+            <EventLogDocument meta={meta} rows={events} notes={notes} />
+          </div>
         </div>
 
         {/* ====================================================
@@ -2066,26 +2118,6 @@ function EventLogEditor({
           {emailNotification}
         </div>
       )}
-
-      {/* ======================================================
-          PDF GENERÁLÁSHOZ HASZNÁLT REJTETT DOKUMENTUM
-         ====================================================== */}
-
-      <div
-        ref={pdfContentRef}
-        style={{
-          position: "absolute",
-          left: "-100000px",
-          top: 0,
-          width: "1120px",
-          background: "white",
-        }}
-      >
-        <EventLogDocument
-          meta={meta}
-          rows={events}
-        />
-      </div>
 
       {/* ======================================================
           FEJLÉC
@@ -2602,6 +2634,7 @@ function EventLogEditor({
                       deleteEvent={
                         deleteEvent
                       }
+                      currentUserName={activeUserName}
                     />
                   )
                 )
@@ -2650,6 +2683,7 @@ function EventLogEditor({
                   deleteEvent={
                     deleteEvent
                   }
+                  currentUserName={activeUserName}
                 />
               )
             )
@@ -2713,6 +2747,18 @@ function EventLogEditor({
           MENTÉS / VÉGLEGESÍTÉS
          ====================================================== */}
 
+      {saveFeedback && (
+        <div
+          className={`mt-5 rounded-xl border px-4 py-3 text-sm ${
+            saveFeedback.type === "success"
+              ? "border-green-200 bg-green-50 text-green-900"
+              : "border-amber-200 bg-amber-50 text-amber-900"
+          }`}
+        >
+          {saveFeedback.text}
+        </div>
+      )}
+
       <div
         className="
           mt-6
@@ -2730,6 +2776,7 @@ function EventLogEditor({
         <button
           type="button"
           onClick={handleSave}
+          disabled={isSaving || isFinalizing}
           className="
             min-h-10
             rounded-[7px]
@@ -2746,16 +2793,18 @@ function EventLogEditor({
             hover:border-[#98a5b7]
             hover:bg-[#f5f7fa]
             hover:shadow-[0_2px_5px_rgba(0,0,0,0.06)]
+            disabled:cursor-not-allowed
+            disabled:opacity-60
             max-[600px]:w-full
           "
         >
-          Mentés
+          {isSaving ? "Mentés..." : "Mentés"}
         </button>
 
         <button
           type="button"
           onClick={handleOpenFinalizeModal}
-          disabled={isGeneratingPdf}
+          disabled={isSaving || isFinalizing}
           className="
             min-h-10
             rounded-[7px]
@@ -2777,9 +2826,7 @@ function EventLogEditor({
             max-[600px]:w-full
           "
         >
-          {isGeneratingPdf
-            ? "PDF generálása..."
-            : "Véglegesítés"}
+          {isFinalizing ? "Véglegesítés..." : "Véglegesítés"}
         </button>
       </div>
 

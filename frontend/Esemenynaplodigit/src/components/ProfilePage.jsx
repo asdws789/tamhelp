@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { inMemoryDb } from "../data/inMemoryDb";
 
 import {
   User,
@@ -95,7 +96,37 @@ const MASTER_DATA = {
 
 function ProfilePage({
   currentUser = CURRENT_USER,
+  masterData: propMasterData,
+  onUserUpdated,
 }) {
+  const [registeredUsers, setRegisteredUsers] = useState([]);
+  const [masterData, setMasterData] = useState(
+    () => propMasterData || inMemoryDb.masterData || {}
+  );
+  const [profileFeedback, setProfileFeedback] = useState(null);
+  const [passwordFeedback, setPasswordFeedback] = useState(null);
+
+  useEffect(() => {
+    if (propMasterData) {
+      setMasterData(propMasterData);
+    }
+  }, [propMasterData]);
+
+  useEffect(() => {
+    fetch("http://localhost:3000/api/master-data")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setMasterData(data);
+      })
+      .catch(() => {});
+
+    fetch("http://localhost:3000/api/users")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data)) setRegisteredUsers(data);
+      })
+      .catch(() => setRegisteredUsers(inMemoryDb.getUsers()));
+  }, []);
   /*
   |--------------------------------------------------------------------------
   | KIVÁLASZTOTT FELHASZNÁLÓ
@@ -189,21 +220,53 @@ function ProfilePage({
   |--------------------------------------------------------------------------
   */
 
-  const saveProfile = () => {
-    /*
-     * Jelenleg csak lokális tesztelés.
-     *
-     * Később:
-     *
-     * PUT /api/users/:id
-     */
+  const saveProfile = async () => {
+    const targetUser = selectedUser || currentUser;
+    setProfileFeedback(null);
 
-    console.log(
-      "Profil mentése:",
-      profileForm
-    );
+    try {
+      const res = await fetch(
+        `http://localhost:3000/api/users/${targetUser.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: profileForm.name,
+            email: profileForm.email,
+            phone: profileForm.phone,
+          }),
+        }
+      );
 
-    setEditingProfile(false);
+      if (res.ok) {
+        const updatedUser = await res.json();
+        setRegisteredUsers((prev) =>
+          prev.map((u) => (u.id === updatedUser.id ? updatedUser : u))
+        );
+        if (selectedUser && selectedUser.id === updatedUser.id) {
+          setSelectedUser(updatedUser);
+        }
+        if (
+          currentUser &&
+          currentUser.id === updatedUser.id &&
+          typeof onUserUpdated === "function"
+        ) {
+          onUserUpdated(updatedUser);
+        }
+        setEditingProfile(false);
+        setProfileFeedback({
+          type: "success",
+          text: "A profil adatai sikeresen mentésre kerültek az adatbázisba.",
+        });
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      setProfileFeedback({
+        type: "error",
+        text: `Nem sikerült menteni a profil adatokat (${err.message}).`,
+      });
+    }
   };
 
 
@@ -230,53 +293,71 @@ function ProfilePage({
   |--------------------------------------------------------------------------
   */
 
-  const savePassword = () => {
+  const savePassword = async () => {
+    const targetUser = selectedUser || currentUser;
+    setPasswordFeedback(null);
+
     if (
       !passwordForm.currentPassword ||
       !passwordForm.newPassword ||
       !passwordForm.confirmPassword
     ) {
-      alert(
-        "Minden jelszómezőt ki kell tölteni."
-      );
-
+      setPasswordFeedback({
+        type: "error",
+        text: "Minden jelszómezőt ki kell tölteni.",
+      });
       return;
     }
-
 
     if (
       passwordForm.newPassword !==
       passwordForm.confirmPassword
     ) {
-      alert(
-        "Az új jelszavak nem egyeznek."
-      );
-
+      setPasswordFeedback({
+        type: "error",
+        text: "Az új jelszavak nem egyeznek.",
+      });
       return;
     }
 
+    try {
+      const res = await fetch(
+        `http://localhost:3000/api/users/${targetUser.id}/password`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            currentPassword: passwordForm.currentPassword,
+            newPassword: passwordForm.newPassword,
+          }),
+        }
+      );
 
-    /*
-     * Jelenleg csak tesztelési célú működés.
-     *
-     * Később:
-     *
-     * PUT /api/users/:id/password
-     */
+      if (res.ok) {
+        setPasswordForm({
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
+        });
+        setChangingPassword(false);
+        setProfileFeedback({
+          type: "success",
+          text: "A jelszó sikeresen módosítva lett az adatbázisban.",
+        });
+        return;
+      }
 
-    console.log(
-      "Jelszó módosítása"
-    );
-
-
-    setPasswordForm({
-      currentPassword: "",
-      newPassword: "",
-      confirmPassword: "",
-    });
-
-
-    setChangingPassword(false);
+      const errData = await res.json().catch(() => ({}));
+      setPasswordFeedback({
+        type: "error",
+        text: errData.error || "A jelszó módosítása sikertelen.",
+      });
+    } catch (err) {
+      setPasswordFeedback({
+        type: "error",
+        text: `Hálózati hiba: ${err.message}`,
+      });
+    }
   };
 
 
@@ -334,9 +415,21 @@ function ProfilePage({
     <div className="space-y-6">
 
 
-      {/* ====================================================
-          PROFIL FEJLÉC
-          ==================================================== */}
+        {/* ====================================================
+            PROFIL FEJLÉC
+            ==================================================== */}
+
+      {profileFeedback && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            profileFeedback.type === "error"
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-green-200 bg-green-50 text-green-800"
+          }`}
+        >
+          {profileFeedback.text}
+        </div>
+      )}
 
       <div className="rounded-2xl bg-white shadow overflow-hidden">
 
@@ -960,6 +1053,19 @@ function ProfilePage({
                   </div>
 
 
+                  {/* HIBA / VISSZAJELZÉS */}
+                  {passwordFeedback && (
+                    <div
+                      className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                        passwordFeedback.type === "error"
+                          ? "bg-red-50 text-red-700"
+                          : "bg-green-50 text-green-700"
+                      }`}
+                    >
+                      {passwordFeedback.text}
+                    </div>
+                  )}
+
                   {/* JELSZÓ MENTÉSE */}
 
                   <button
@@ -1037,7 +1143,7 @@ function ProfilePage({
                   className="text-gray-500"
                 />
 
-                {ETO_DATA.organization}
+                {masterData.organization}
 
               </div>
 
@@ -1059,7 +1165,7 @@ function ProfilePage({
                   className="text-gray-500"
                 />
 
-                {ETO_DATA.email}
+                {masterData.officialEmail || masterData.organizationEmail}
 
               </div>
 
@@ -1081,7 +1187,7 @@ function ProfilePage({
                   className="text-gray-500"
                 />
 
-                {ETO_DATA.phone}
+                {masterData.phone || masterData.organizationPhone}
 
               </div>
 
@@ -1103,7 +1209,7 @@ function ProfilePage({
                   className="text-gray-500"
                 />
 
-                {ETO_DATA.address}
+                {masterData.address || masterData.organizationAddress}
 
               </div>
 
@@ -1158,7 +1264,7 @@ function ProfilePage({
             </label>
 
             <div className="mt-1 rounded-lg bg-gray-50 px-3 py-2 text-sm">
-              {MASTER_DATA.organizer}
+              {masterData.organizer || masterData.organization}
             </div>
 
           </div>
@@ -1173,7 +1279,7 @@ function ProfilePage({
             </label>
 
             <div className="mt-1 rounded-lg bg-gray-50 px-3 py-2 text-sm">
-              {MASTER_DATA.chiefOrganizer}
+              {masterData.chiefOrganizer}
             </div>
 
           </div>
@@ -1188,7 +1294,7 @@ function ProfilePage({
             </label>
 
             <div className="mt-1 rounded-lg bg-gray-50 px-3 py-2 text-sm">
-              {MASTER_DATA.healthcareProvider}
+              {masterData.healthcareProvider}
             </div>
 
           </div>
@@ -1203,7 +1309,7 @@ function ProfilePage({
             </label>
 
             <div className="mt-1 rounded-lg bg-gray-50 px-3 py-2 text-sm">
-              {MASTER_DATA.disasterProtectionProvider}
+              {masterData.disasterProtectionProvider}
             </div>
 
           </div>
@@ -1224,7 +1330,7 @@ function ProfilePage({
                 className="text-gray-500"
               />
 
-              {MASTER_DATA.reportEmail}
+              {masterData.reportEmail}
 
             </div>
 
@@ -1294,7 +1400,7 @@ function ProfilePage({
 
               <tbody>
 
-                {REGISTERED_USERS.map(
+                {registeredUsers.map(
                   (user) => (
 
                     <tr

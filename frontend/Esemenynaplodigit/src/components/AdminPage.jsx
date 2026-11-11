@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { inMemoryDb } from "../data/inMemoryDb";
 
 import {
   User,
@@ -73,7 +74,11 @@ const INITIAL_MASTER_DATA = {
 |--------------------------------------------------------------------------
 */
 
-function AdminPage() {
+function AdminPage({
+  dbStatus,
+  mlszMatchesCount = 0,
+  onMasterDataUpdated,
+}) {
   /*
   |--------------------------------------------------------------------------
   | OLDALSÓ ADMIN MENÜ
@@ -88,13 +93,15 @@ function AdminPage() {
   |--------------------------------------------------------------------------
   */
 
-  const [users, setUsers] = useState(INITIAL_USERS);
+  const [users, setUsers] = useState(() => inMemoryDb.getUsers());
 
   const [selectedUser, setSelectedUser] = useState(null);
 
   const [editingUser, setEditingUser] = useState(false);
 
   const [addingUser, setAddingUser] = useState(false);
+
+  const [adminFeedback, setAdminFeedback] = useState(null);
 
   /*
   |--------------------------------------------------------------------------
@@ -104,9 +111,11 @@ function AdminPage() {
 
   const emptyUser = {
     name: "",
+    username: "",
     email: "",
     phone: "",
     role: "Biztonsági vezető",
+    password: "",
   };
 
   const [userForm, setUserForm] = useState(emptyUser);
@@ -118,14 +127,33 @@ function AdminPage() {
   */
 
   const [masterData, setMasterData] = useState(
-    INITIAL_MASTER_DATA
+    () => inMemoryDb.masterData || INITIAL_MASTER_DATA
   );
 
   const [editingMasterData, setEditingMasterData] =
     useState(false);
 
   const [masterDataForm, setMasterDataForm] =
-    useState(INITIAL_MASTER_DATA);
+    useState(() => inMemoryDb.masterData || INITIAL_MASTER_DATA);
+
+  useEffect(() => {
+    fetch("http://localhost:3000/api/users")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data)) setUsers(data);
+      })
+      .catch(() => {});
+
+    fetch("http://localhost:3000/api/master-data")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) {
+          setMasterData(data);
+          setMasterDataForm(data);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   /*
   |--------------------------------------------------------------------------
@@ -164,9 +192,11 @@ function AdminPage() {
 
     setUserForm({
       name: user.name,
+      username: user.username || "",
       email: user.email,
       phone: user.phone,
       role: user.role,
+      password: "",
     });
 
     setAddingUser(false);
@@ -186,9 +216,11 @@ function AdminPage() {
 
     setUserForm({
       name: selectedUser.name,
+      username: selectedUser.username || "",
       email: selectedUser.email,
       phone: selectedUser.phone,
       role: selectedUser.role,
+      password: "",
     });
 
     setEditingUser(true);
@@ -200,69 +232,100 @@ function AdminPage() {
   |--------------------------------------------------------------------------
   */
 
-  const saveUser = () => {
+  const saveUser = async () => {
     if (
       !userForm.name.trim() ||
-      !userForm.email.trim() ||
-      !userForm.phone.trim()
+      !userForm.email.trim()
     ) {
-      alert("A név, e-mail és telefonszám megadása kötelező.");
-
+      alert("A név és e-mail megadása kötelező.");
       return;
     }
 
-    /*
-     * ÚJ FELHASZNÁLÓ
-     */
+    setAdminFeedback(null);
 
     if (addingUser) {
-      const newUser = {
-        id: Date.now(),
-        ...userForm,
-      };
+      const derivedUsername =
+        (userForm.username || "").trim() ||
+        userForm.email.split("@")[0].trim() ||
+        `user${Date.now()}`;
 
-      setUsers((prev) => [
-        ...prev,
-        newUser,
-      ]);
-
-      setSelectedUser(newUser);
-      setAddingUser(false);
-
+      try {
+        const res = await fetch("http://localhost:3000/api/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: derivedUsername,
+            name: userForm.name.trim(),
+            email: userForm.email.trim(),
+            phone: userForm.phone.trim(),
+            role: userForm.role,
+            password: userForm.password?.trim() || "Eto2026!",
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP ${res.status}`);
+        }
+        const createdUser = await res.json();
+        setUsers((prev) => [...prev, createdUser]);
+        setSelectedUser(createdUser);
+        setAddingUser(false);
+        setAdminFeedback({
+          type: "success",
+          text: `Új felhasználó elmentve az adatbázisba: ${createdUser.name} (${createdUser.username})`,
+        });
+      } catch (err) {
+        setAdminFeedback({
+          type: "error",
+          text: `Felhasználó létrehozása sikertelen (${err.message}).`,
+        });
+      }
       return;
     }
 
-    /*
-     * MEGLÉVŐ FELHASZNÁLÓ
-     */
-
     if (editingUser && selectedUser) {
-      const updatedUser = {
-        ...selectedUser,
-        ...userForm,
-      };
-
-      setUsers((prev) =>
-        prev.map((user) =>
-          user.id === selectedUser.id
-            ? updatedUser
-            : user
-        )
-      );
-
-      setSelectedUser(updatedUser);
-      setEditingUser(false);
+      try {
+        const payload = {
+          username: userForm.username?.trim() || selectedUser.username,
+          name: userForm.name.trim(),
+          email: userForm.email.trim(),
+          phone: userForm.phone.trim(),
+          role: userForm.role,
+        };
+        if (userForm.password && userForm.password.trim() !== "") {
+          payload.password = userForm.password.trim();
+        }
+        const res = await fetch(
+          `http://localhost:3000/api/users/${selectedUser.id}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }
+        );
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP ${res.status}`);
+        }
+        const updatedUser = await res.json();
+        setUsers((prev) =>
+          prev.map((user) =>
+            user.id === selectedUser.id ? updatedUser : user
+          )
+        );
+        setSelectedUser(updatedUser);
+        setEditingUser(false);
+        setAdminFeedback({
+          type: "success",
+          text: `Felhasználó adatai frissítve az adatbázisban: ${updatedUser.name}`,
+        });
+      } catch (err) {
+        setAdminFeedback({
+          type: "error",
+          text: `Felhasználó módosítása sikertelen (${err.message}).`,
+        });
+      }
     }
-
-    /*
-     * KÉSŐBB:
-     *
-     * PUT /api/users/:id
-     *
-     * illetve új felhasználónál:
-     *
-     * POST /api/users
-     */
   };
 
   /*
@@ -293,7 +356,7 @@ function AdminPage() {
   |--------------------------------------------------------------------------
   */
 
-  const deleteUser = () => {
+  const deleteUser = async () => {
     if (!selectedUser) {
       return;
     }
@@ -306,15 +369,30 @@ function AdminPage() {
       return;
     }
 
-    setUsers((prev) =>
-      prev.filter(
-        (user) => user.id !== selectedUser.id
-      )
-    );
-
-    setSelectedUser(null);
-    setEditingUser(false);
-    setAddingUser(false);
+    try {
+      const res = await fetch(
+        `http://localhost:3000/api/users/${selectedUser.id}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setUsers((prev) =>
+        prev.filter((user) => user.id !== selectedUser.id)
+      );
+      setSelectedUser(null);
+      setEditingUser(false);
+      setAddingUser(false);
+      setAdminFeedback({
+        type: "success",
+        text: `Felhasználó törölve: ${selectedUser.name}`,
+      });
+    } catch (err) {
+      setAdminFeedback({
+        type: "error",
+        text: `Felhasználó törlése sikertelen (${err.message}).`,
+      });
+    }
   };
 
   /*
@@ -350,15 +428,33 @@ function AdminPage() {
   |--------------------------------------------------------------------------
   */
 
-  const saveMasterData = () => {
-    setMasterData(masterDataForm);
-    setEditingMasterData(false);
-
-    /*
-     * KÉSŐBB:
-     *
-     * PUT /api/master-data
-     */
+  const saveMasterData = async () => {
+    try {
+      const res = await fetch("http://localhost:3000/api/master-data", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(masterDataForm),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const saved = await res.json();
+      setMasterData(saved);
+      setMasterDataForm(saved);
+      setEditingMasterData(false);
+      if (typeof onMasterDataUpdated === "function") {
+        onMasterDataUpdated(saved);
+      }
+      setAdminFeedback({
+        type: "success",
+        text: "Szervezeti törzsadatok sikeresen mentve az adatbázisba.",
+      });
+    } catch (err) {
+      setAdminFeedback({
+        type: "error",
+        text: `Törzsadatok mentése sikertelen (${err.message}).`,
+      });
+    }
   };
 
   /*
@@ -384,6 +480,18 @@ function AdminPage() {
       {/* =========================================================
           ADMIN FEJLÉC
           ========================================================= */}
+
+      {adminFeedback && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            adminFeedback.type === "error"
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-green-200 bg-green-50 text-green-800"
+          }`}
+        >
+          {adminFeedback.text}
+        </div>
+      )}
 
       <div className="rounded-2xl bg-white shadow overflow-hidden">
 
@@ -994,6 +1102,70 @@ function AdminPage() {
                     </div>
 
 
+                    <div>
+
+                      <label className="mb-1 block text-xs font-semibold text-gray-500">
+                        Felhasználónév (belépéshez)
+                      </label>
+
+                      <input
+                        type="text"
+                        value={userForm.username || ""}
+                        placeholder="pl. kissjanos"
+                        onChange={(e) =>
+                          handleUserFormChange(
+                            "username",
+                            e.target.value
+                          )
+                        }
+                        className="
+                          w-full
+                          rounded-lg
+                          border
+                          border-gray-300
+                          px-3
+                          py-2
+                          text-sm
+                          outline-none
+                          focus:border-[#2E7D32]
+                        "
+                      />
+
+                    </div>
+
+
+                    <div>
+
+                      <label className="mb-1 block text-xs font-semibold text-gray-500">
+                        {addingUser ? "Jelszó (alapértelmezett: Eto2026!)" : "Új jelszó (üresen hagyva változatlan)"}
+                      </label>
+
+                      <input
+                        type="password"
+                        value={userForm.password || ""}
+                        placeholder={addingUser ? "Eto2026!" : "••••••••"}
+                        onChange={(e) =>
+                          handleUserFormChange(
+                            "password",
+                            e.target.value
+                          )
+                        }
+                        className="
+                          w-full
+                          rounded-lg
+                          border
+                          border-gray-300
+                          px-3
+                          py-2
+                          text-sm
+                          outline-none
+                          focus:border-[#2E7D32]
+                        "
+                      />
+
+                    </div>
+
+
                     <div className="flex gap-3 pt-2 md:col-span-2">
 
                       <button
@@ -1465,12 +1637,16 @@ function AdminPage() {
 
                 <SystemInfo
                   label="Adatbázis"
-                  value="Kapcsolatra vár"
+                  value={
+                    dbStatus?.connected
+                      ? "PostgreSQL (Aktív)"
+                      : dbStatus?.type || "In-Memory Fallback"
+                  }
                 />
 
                 <SystemInfo
                   label="MLSZ adatkapcsolat"
-                  value="Kapcsolatra vár"
+                  value={`Mock MLSZ API (${mlszMatchesCount ?? 0} mérkőzés)`}
                 />
 
                 <SystemInfo

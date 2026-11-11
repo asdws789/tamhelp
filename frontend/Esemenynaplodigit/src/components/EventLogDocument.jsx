@@ -1,15 +1,12 @@
 // EventLogDocument.jsx
 import logo from "../assets/logo.png";
-import { eventRows as defaultSampleRows } from "../data/EventLogData";
-
-export default function EventLogDocument({ meta = {}, rows = [] }) {
+export default function EventLogDocument({ meta = {}, rows = [], notes = [] }) {
   const securityOfficer = meta.securityOfficer || {};
   const headOrganizer = meta.headOrganizer || {};
   const medicalService = meta.medicalService || {};
   const disasterProtection = meta.disasterProtection || {};
 
-  // Ha nincsenek események átadva, használjuk az alapértelmezett minta eseményeket
-  const displayRows = rows && rows.length > 0 ? rows : defaultSampleRows;
+  const displayRows = Array.isArray(rows) ? rows : [];
 
   const homeAway =
     meta.homeTeam && meta.awayTeam
@@ -187,22 +184,49 @@ export default function EventLogDocument({ meta = {}, rows = [] }) {
           </tr>
         </thead>
         <tbody>
-          {displayRows.map((row, index) => (
-            <tr key={row.id || index}>
-              <td style={{ ...tdStyle, textAlign: "center" }}>
-                {row.sequenceNumber || index + 1}
+          {displayRows.length === 0 ? (
+            <tr>
+              <td colSpan={6} style={{ ...tdStyle, textAlign: "center", padding: "14px", color: "#555" }}>
+                A mérkőzés során rendkívüli esemény nem került rögzítésre.
               </td>
-              <td style={{ ...tdStyle, textAlign: "center" }}>
-                {row.time || "—"}
-              </td>
-              <td style={tdStyle}>{row.reporterName || "—"}</td>
-              <td style={tdStyle}>{row.eventDescription || row.eventType || "—"}</td>
-              <td style={tdStyle}>{row.decisionMaker || "—"}</td>
-              <td style={tdStyle}>{row.actionResult || row.actionType || "—"}</td>
             </tr>
-          ))}
+          ) : (
+            displayRows.map((row, index) => (
+              <tr key={row.id || index}>
+                <td style={{ ...tdStyle, textAlign: "center" }}>
+                  {row.sequenceNumber || index + 1}
+                </td>
+                <td style={{ ...tdStyle, textAlign: "center" }}>
+                  {row.time || "—"}
+                </td>
+                <td style={tdStyle}>{row.reporterName || "—"}</td>
+                <td style={tdStyle}>{row.eventDescription || row.eventType || "—"}</td>
+                <td style={tdStyle}>{row.decisionMaker || "—"}</td>
+                <td style={tdStyle}>{row.actionResult || row.actionType || "—"}</td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
+
+      {Array.isArray(notes) && notes.length > 0 && (
+        <div style={{ marginTop: "20px", borderTop: "1px solid #888", paddingTop: "10px", fontSize: "10.5pt" }}>
+          <div style={{ fontWeight: "bold", fontSize: "12pt", marginBottom: "6px" }}>
+            Utólagos megjegyzések
+          </div>
+          <ul style={{ margin: 0, paddingLeft: "18px" }}>
+            {notes.map((n) => (
+              <li key={n.id} style={{ marginBottom: "4px" }}>
+                <strong>{n.createdBy || "Rendszer"}</strong>{" "}
+                <span style={{ color: "#555", fontSize: "9.5pt" }}>
+                  ({n.createdAt || ""})
+                </span>
+                : {n.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

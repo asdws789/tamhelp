@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { User, Menu, FileText } from "lucide-react";
+import { User, Menu, FileText, Download } from "lucide-react";
 
 import LoginPage from "./components/LoginPage";
 import EventLogEditor from "./components/EventLogEditor";
@@ -9,6 +9,7 @@ import { inMemoryDb } from "./data/inMemoryDb";
 import {
   isMatchOlderThan12Hours,
   fetchMatchResultFromMockApi,
+  fetchAllMlszMatches,
   sendEventLogClosedEmail,
 } from "./data/mockMlszApi";
 
@@ -18,6 +19,8 @@ function App() {
   const [matches, setMatches] = useState([]);
   const [archived, setArchived] = useState([]);
   const [closed, setClosed] = useState([]);
+  const [upcomingMatches, setUpcomingMatches] = useState([]);
+  const [masterData, setMasterData] = useState(() => inMemoryDb.masterData || {});
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedLog, setSelectedLog] = useState(null);
@@ -42,27 +45,41 @@ function App() {
   const autoClosedIdsRef = useRef(new Set());
 
   const loadMatches = async () => {
+    let allMatches = [];
     try {
       const res = await fetch("http://localhost:3000/api/matches");
       if (res.ok) {
-        const allMatches = await res.json();
-        setMatches(allMatches.filter((m) => m.status === "in_progress"));
-        setClosed(allMatches.filter((m) => m.status === "finalized"));
-        setArchived(allMatches.filter((m) => m.status === "archived"));
-        return;
+        allMatches = await res.json();
       }
     } catch {
       // Backend nem elérhető, fallback in-memory
     }
 
-    const allMatches = inMemoryDb.getMatches();
+    if (allMatches.length === 0) {
+      allMatches = inMemoryDb.getMatches();
+    }
+
     setMatches(allMatches.filter((m) => m.status === "in_progress"));
     setClosed(allMatches.filter((m) => m.status === "finalized"));
     setArchived(allMatches.filter((m) => m.status === "archived"));
+
+    try {
+      const mlszRes = await fetchAllMlszMatches({ status: "scheduled" });
+      const existingIds = new Set(allMatches.map((m) => String(m.id)));
+      const scheduled = (mlszRes.matches || [])
+        .filter((m) => !existingIds.has(String(m.id)))
+        .map((m) => ({
+          ...m,
+          title: `${m.homeTeam} vs ${m.awayTeam}`,
+          date: m.date ? `${m.date.replace(/-/g, ". ")}.` : "",
+        }));
+      setUpcomingMatches(scheduled);
+    } catch {
+      setUpcomingMatches([]);
+    }
   };
 
   useEffect(() => {
-    // Adatbázis státusz lekérdezése
     fetch("http://localhost:3000/api/db/status")
       .then((res) => res.json())
       .then((data) => setDbStatus(data))
@@ -70,69 +87,130 @@ function App() {
         setDbStatus({ connected: false, type: "In-Memory Database" })
       );
 
+    fetch("http://localhost:3000/api/master-data")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setMasterData(data);
+      })
+      .catch(() => {});
+
     loadMatches();
   }, []);
+
+  const syncMatchInState = (updatedMatch) => {
+    if (!updatedMatch) return;
+    const idStr = String(updatedMatch.id);
+    setMatches((prev) => {
+      const rest = prev.filter((m) => String(m.id) !== idStr);
+      return updatedMatch.status === "in_progress" ? [updatedMatch, ...rest] : rest;
+    });
+    setClosed((prev) => {
+      const rest = prev.filter((m) => String(m.id) !== idStr);
+      return updatedMatch.status === "finalized" ? [updatedMatch, ...rest] : rest;
+    });
+    setArchived((prev) => {
+      const rest = prev.filter((m) => String(m.id) !== idStr);
+      return updatedMatch.status === "archived" ? [updatedMatch, ...rest] : rest;
+    });
+    if (selectedLog && String(selectedLog.id) === idStr) {
+      setSelectedLog(updatedMatch);
+      setEditorStatus(updatedMatch.status);
+    }
+  };
+
+  const handleSaveMatch = (updatedMatch) => {
+    syncMatchInState(updatedMatch);
+  };
+
+  const handleNoteAdded = (matchId, note) => {
+    const appendNote = (m) =>
+      String(m.id) === String(matchId)
+        ? { ...m, notes: [...(m.notes || []), note] }
+        : m;
+    setClosed((prev) => prev.map(appendNote));
+    setArchived((prev) => prev.map(appendNote));
+    setSelectedLog((prev) =>
+      prev && String(prev.id) === String(matchId) ? appendNote(prev) : prev
+    );
+  };
+
+  /*
+   * Mérkőzés archiválása
+   */
+  const handleArchiveMatch = async (matchId) => {
+    let updatedMatch = null;
+    try {
+      const res = await fetch(`http://localhost:3000/api/matches/${matchId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "archived" }),
+      });
+      if (res.ok) {
+        updatedMatch = await res.json();
+      }
+    } catch (err) {
+      console.warn("[App] Nem sikerült az archiválás backend mentése:", err);
+    }
+
+    if (!updatedMatch) {
+      updatedMatch =
+        closed.find((m) => String(m.id) === String(matchId)) || selectedLog;
+      if (updatedMatch) {
+        updatedMatch = { ...updatedMatch, status: "archived" };
+      }
+    }
+
+    syncMatchInState(updatedMatch);
+  };
 
   /*
    * Mérkőzés véglegesítése (manuális vagy automatikus)
    */
   const handleFinalizeMatch = async (matchId, resultData) => {
-    // 1. Mentés a backend adatbázisba (PostgreSQL vagy szerveroldali in-memory)
+    let updatedMatch = null;
     try {
-      await fetch(`http://localhost:3000/api/matches/${matchId}`, {
+      const res = await fetch(`http://localhost:3000/api/matches/${matchId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           status: "finalized",
           score: resultData?.score || null,
           winner: resultData?.winner || null,
+          ...(resultData?.meta ? { meta: resultData.meta } : {}),
+          ...(Array.isArray(resultData?.events)
+            ? { events: resultData.events }
+            : {}),
         }),
       });
+      if (res.ok) {
+        updatedMatch = await res.json();
+      }
     } catch (err) {
       console.warn("[App] Nem sikerült a backend adatbázis frissítése:", err);
     }
 
-    // 2. Kliensoldali memóriabeli szinkronizáció
     inMemoryDb.updateMatch(matchId, {
       status: "finalized",
       score: resultData?.score,
       winner: resultData?.winner,
     });
 
-    // 3. React állapot azonnali frissítése - típusbiztos string egyezéssel
-    setMatches((prevMatches) => {
-      const matchToFinalize = prevMatches.find((m) => String(m.id) === String(matchId));
-      if (matchToFinalize) {
-        const finalized = {
-          ...matchToFinalize,
+    if (!updatedMatch) {
+      const base =
+        matches.find((m) => String(m.id) === String(matchId)) || selectedLog;
+      if (base) {
+        updatedMatch = {
+          ...base,
           status: "finalized",
-          score: resultData?.score || matchToFinalize.score,
-          winner: resultData?.winner || matchToFinalize.winner,
-          result: resultData,
+          score: resultData?.score || base.score,
+          winner: resultData?.winner || base.winner,
+          meta: resultData?.meta || base.meta,
+          events: resultData?.events || base.events,
         };
-        setClosed((prevClosed) => [
-          finalized,
-          ...prevClosed.filter((m) => String(m.id) !== String(matchId)),
-        ]);
-        return prevMatches.filter((m) => String(m.id) !== String(matchId));
       }
-      return prevMatches;
-    });
-
-    if (selectedLog && String(selectedLog.id) === String(matchId)) {
-      setSelectedLog((prev) =>
-        prev
-          ? {
-              ...prev,
-              status: "finalized",
-              score: resultData?.score || prev.score,
-              winner: resultData?.winner || prev.winner,
-              result: resultData,
-            }
-          : prev
-      );
-      setEditorStatus("finalized");
     }
+
+    syncMatchInState(updatedMatch);
   };
 
   /*
@@ -149,24 +227,22 @@ function App() {
         !autoClosedIdsRef.current.has(m.id)
       ) {
         autoClosedIdsRef.current.add(m.id);
-        console.log(
-          `[Auto-Close] Match ${m.id} (${m.title}) > 12 órája kezdődött. Automatikus lezárás Mock API-ból...`
-        );
         const result = await fetchMatchResultFromMockApi(m.id);
         const autoResult = {
           winner: result?.winner || "Ismeretlen",
           score: result?.score || "N/A",
           isAuto: true,
         };
-        handleFinalizeMatch(m.id, autoResult);
+        await handleFinalizeMatch(m.id, autoResult);
         await sendEventLogClosedEmail({
           match: m,
           result: autoResult,
-          currentUserEmail: currentUser?.email || "user1@eto.hu",
+          recipientEmail: masterData?.reportEmail || "szeconnect.projektmunka@gmail.com",
+          reason: "auto-12h",
         });
       }
     });
-  }, [matches, currentUser]);
+  }, [matches, masterData]);
 
   /*
    * Aktuális menüpont / eseménynapló státusz megnevezése.
@@ -241,62 +317,86 @@ function App() {
   };
 
   /*
-   * PDF export
-   *
-   * async function downloadPDF() {
-   *   if (!contentRef.current) {
-   *     console.error("PDF content not ready");
-   *     return;
-   *   }
-   *
-   *   const html = contentRef.current.innerHTML;
-   *
-   *   try {
-   *     const res = await fetch(
-   *       "http://localhost:3000/generate-pdf",
-   *       {
-   *         method: "POST",
-   *         headers: {
-   *           "Content-Type": "application/json",
-   *         },
-   *         body: JSON.stringify({ html }),
-   *       }
-   *     );
-   *
-   *     if (!res.ok) {
-   *       throw new Error("PDF generation failed");
-   *     }
-   *
-   *     const blob = await res.blob();
-   *     const url = window.URL.createObjectURL(blob);
-   *
-   *     const a = document.createElement("a");
-   *     a.href = url;
-   *     a.download = "event-log.pdf";
-   *     a.click();
-   *
-   *     window.URL.revokeObjectURL(url);
-   *   } catch (err) {
-   *     console.error(err);
-   *   }
-   * }
+   * Mérkőzés kiválasztása: friss adatokat kérünk a backendtől ha elérhető.
    */
+  const handleClick = async (match) => {
+    setSelectedLog(match);
+    setEditorStatus(match.status);
+    setMenuOpen(false);
+
+    try {
+      const res = await fetch(`http://localhost:3000/api/matches/${match.id}`);
+      if (res.ok) {
+        const fresh = await res.json();
+        setSelectedLog(fresh);
+        setEditorStatus(fresh.status);
+      }
+    } catch {
+      // Offline fallback: marad a meglévő objektum
+    }
+  };
 
   /*
-   * Mérkőzés kiválasztása.
+   * Következő (MLSZ) mérkőzés megnyitása / importálása az adatbázisba.
    */
-  const handleClick = (match) => {
-    setSelectedLog(match);
+  const handleOpenUpcomingMatch = async (mlszMatch) => {
+    const newMatchPayload = {
+      id: mlszMatch.id,
+      teamId: mlszMatch.teamId || 323805,
+      competition: mlszMatch.competition,
+      homeTeam: mlszMatch.homeTeam,
+      awayTeam: mlszMatch.awayTeam,
+      title: mlszMatch.title,
+      date: mlszMatch.date,
+      time: mlszMatch.time,
+      venue: mlszMatch.venue,
+      status: "in_progress",
+      meta: {
+        competitionName: mlszMatch.competition || "",
+        homeTeam: mlszMatch.homeTeam || "",
+        awayTeam: mlszMatch.awayTeam || "",
+        matchDate: mlszMatch.date || "",
+        matchTime: mlszMatch.time || "",
+        venue: mlszMatch.venue || "",
+        organizer: masterData?.organizer || masterData?.organization || "Rába ETO SE Győr",
+        headOrganizer: {
+          name: masterData?.chiefOrganizer || "",
+          phone: masterData?.phone || "",
+        },
+        medicalService: {
+          organization: masterData?.healthcareProvider || "",
+          person: "",
+        },
+        disasterProtection: {
+          organization: masterData?.disasterProtectionProvider || "",
+          person: "",
+        },
+      },
+    };
 
-    /*
-     * Az eseménynapló kezdeti státuszát
-     * az adott mérkőzés státuszából vesszük.
-     */
-    setEditorStatus(match.status);
+    try {
+      const res = await fetch("http://localhost:3000/api/matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newMatchPayload),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setMatches((prev) => [
+          created,
+          ...prev.filter((m) => String(m.id) !== String(created.id)),
+        ]);
+        setUpcomingMatches((prev) =>
+          prev.filter((m) => String(m.id) !== String(created.id))
+        );
+        handleClick(created);
+        return;
+      }
+    } catch (err) {
+      console.warn("[App] Nem sikerült az MLSZ meccs mentése DB-be:", err);
+    }
 
-    // Mobilon a menü legyen bezárva,
-    // amikor megnyitjuk az eseménynaplót.
-    setMenuOpen(false);
+    handleClick({ ...newMatchPayload, events: [], notes: [] });
   };
 
   /*
@@ -329,7 +429,7 @@ function App() {
    * Mobilon a táblázat vízszintesen görgethető,
    * így nem törik össze a layout kis képernyőn.
    */
-  const renderTable = (data, isClosed = false) => (
+  const renderTable = (data, isClosed = false, onRowClick = handleClick) => (
     <div className="w-full overflow-x-auto rounded-2xl shadow">
       <table className="w-full min-w-[600px] text-sm bg-white">
         <thead className="bg-[#2E7D32] text-white text-left">
@@ -355,7 +455,7 @@ function App() {
             data.map((m) => (
               <tr
                 key={m.id}
-                onClick={() => handleClick(m)}
+                onClick={() => onRowClick(m)}
                 className="border-t cursor-pointer hover:bg-gray-50 transition-colors"
               >
                 <td className="p-3 font-medium">
@@ -380,19 +480,32 @@ function App() {
                     className="p-3 text-right whitespace-nowrap"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      onClick={() =>
-                        window.open(
-                          `http://localhost:3000/api/matches/${m.id}/pdf`,
-                          "_blank"
-                        )
-                      }
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#2E7D32] hover:bg-[#256629] text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
-                      title="PDF összefoglaló megnyitása új lapon"
-                    >
-                      <FileText size={14} />
-                      <span>PDF Megnyitása</span>
-                    </button>
+                    <div className="inline-flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          window.open(
+                            `http://localhost:3000/api/matches/${m.id}/pdf`,
+                            "_blank"
+                          )
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#2E7D32] hover:bg-[#256629] text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+                        title="PDF összefoglaló megtekintése új lapon"
+                      >
+                        <FileText size={14} />
+                        <span>Megtekintés</span>
+                      </button>
+
+                      <a
+                        href={`http://localhost:3000/api/matches/${m.id}/pdf?download=1`}
+                        download={`esemenynaplo-${m.id}.pdf`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-900 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+                        title="PDF letöltése"
+                      >
+                        <Download size={14} />
+                        <span>Letöltés</span>
+                      </a>
+                    </div>
                   </td>
                 )}
               </tr>
@@ -608,7 +721,7 @@ function App() {
               </button>
 
               <img
-                src="/src/assets/logo.png"
+                src="/logo.png"
                 className="h-9 sm:h-12 w-auto flex-shrink-0"
                 alt="Rába ETO"
               />
@@ -812,9 +925,13 @@ function App() {
               match={selectedLog}
               eventLogStatus={selectedLog?.status}
               currentUser={currentUser}
+              masterData={masterData}
               onBack={handleBackFromEditor}
               onStatusChange={setEditorStatus}
+              onSaveMatch={handleSaveMatch}
+              onNoteAdded={handleNoteAdded}
               onFinalizeMatch={handleFinalizeMatch}
+              onArchiveMatch={handleArchiveMatch}
             />
           )}
 
@@ -824,7 +941,11 @@ function App() {
 
           {!selectedLog &&
             view === "profile" && (
-              <ProfilePage currentUser={currentUser} />
+              <ProfilePage
+                currentUser={currentUser}
+                masterData={masterData}
+                onUserUpdated={setCurrentUser}
+              />
             )}
 
           {/* =================================================
@@ -847,7 +968,16 @@ function App() {
                   Admin felület
                 </h2>
 
-                <AdminPage />
+                <AdminPage
+                  dbStatus={dbStatus}
+                  mlszMatchesCount={
+                    upcomingMatches.length +
+                    matches.length +
+                    closed.length +
+                    archived.length
+                  }
+                  onMasterDataUpdated={setMasterData}
+                />
 
               </div>
             )}
@@ -914,7 +1044,7 @@ function App() {
                     Következő mérkőzések
                   </h2>
 
-                  {renderTable(matches, false)}
+                  {renderTable(upcomingMatches, false, handleOpenUpcomingMatch)}
                 </div>
 
               </>
@@ -926,7 +1056,9 @@ function App() {
 
           {!selectedLog &&
             view === "upcoming" &&
-            renderTable(matches, false)}
+            renderTable([...matches, ...upcomingMatches], false, (m) =>
+              m.status === "scheduled" ? handleOpenUpcomingMatch(m) : handleClick(m)
+            )}
 
           {/* =================================================
               LEZÁRT
