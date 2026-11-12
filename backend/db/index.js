@@ -314,11 +314,11 @@ const db = {
            WHERE id = 1
            RETURNING *`,
           [
-            data.organization ?? null,
-            data.officialEmail ?? data.organizationEmail ?? null,
+            data.organization ?? data.organizer ?? null,
+            data.organizationEmail ?? data.officialEmail ?? null,
             data.reportEmail ?? null,
-            data.phone ?? data.organizationPhone ?? null,
-            data.address ?? data.organizationAddress ?? null,
+            data.organizationPhone ?? data.phone ?? null,
+            data.organizationAddress ?? data.address ?? null,
             data.organizer ?? data.organization ?? null,
             data.chiefOrganizer ?? null,
             data.healthcareProvider ?? null,

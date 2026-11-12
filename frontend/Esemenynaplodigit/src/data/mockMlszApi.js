@@ -25,6 +25,44 @@ export function isMatchOlderThan12Hours(match) {
   return diffHours >= 12;
 }
 
+/** Formats an ISO or dot-separated date string into Hungarian format (`YYYY. MM. DD.`). */
+export function formatMlszDateToHu(dateStr) {
+  if (!dateStr) return "";
+  const cleaned = String(dateStr).replace(/\s+/g, "").replace(/\.$/, "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+    return `${cleaned.replace(/-/g, ". ")}.`;
+  }
+  return dateStr;
+}
+
+/** Returns hours elapsed since kickoff (negative before kickoff, positive after). */
+function getHoursSinceKickoff(match) {
+  const startDt = getMatchStartDateTime(match);
+  if (!startDt) return null;
+  return (Date.now() - startDt.getTime()) / (1000 * 60 * 60);
+}
+
+/** True when kickoff is still more than 4 hours in the future. */
+export function isMatchBeforeOpenWindow(match) {
+  const hoursSinceStart = getHoursSinceKickoff(match);
+  if (hoursSinceStart === null) return false;
+  return hoursSinceStart < -4;
+}
+
+/** True when match is within 4 hours before kickoff and less than 12 hours after kickoff. */
+export function isMatchWithin4HourOpenWindow(match) {
+  const hoursSinceStart = getHoursSinceKickoff(match);
+  if (hoursSinceStart === null) return false;
+  return hoursSinceStart >= -4 && hoursSinceStart < 12;
+}
+
+/** True when kickoff was at least 7 days (168 hours) ago. */
+export function isMatchOlderThan1Week(match) {
+  const hoursSinceStart = getHoursSinceKickoff(match);
+  if (hoursSinceStart === null) return false;
+  return hoursSinceStart >= 24 * 7;
+}
+
 export async function fetchAllMlszMatches(filters = {}) {
   const params = new URLSearchParams();
   if (filters.teamId) params.set("teamId", filters.teamId);

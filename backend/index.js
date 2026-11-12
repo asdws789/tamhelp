@@ -576,6 +576,24 @@ app.post("/api/matches", async (req, res) => {
 
 app.put("/api/matches/:id", async (req, res) => {
   try {
+    const existing = await db.getMatchById(req.params.id);
+    if (existing) {
+      if (existing.status === "archived") {
+        return res.status(403).json({
+          error: "Archivált eseménynapló már nem módosítható.",
+        });
+      }
+      if (existing.status === "finalized") {
+        if (req.body?.status === "archived") {
+          const archived = await db.updateMatch(req.params.id, { status: "archived" });
+          return res.json(archived);
+        }
+        return res.status(403).json({
+          error: "Lezárt eseménynapló tartalma már nem módosítható.",
+        });
+      }
+    }
+
     const updated = await db.updateMatch(req.params.id, req.body);
     if (!updated) {
       return res.status(404).json({ error: "Match not found" });
@@ -592,10 +610,16 @@ app.post("/api/matches/:id/notes", async (req, res) => {
     if (!text || !String(text).trim()) {
       return res.status(400).json({ error: "A megjegyzés szövege nem lehet üres." });
     }
-    const note = await db.addNote(req.params.id, { text, createdBy });
-    if (!note) {
+    const existing = await db.getMatchById(req.params.id);
+    if (!existing) {
       return res.status(404).json({ error: "Match not found" });
     }
+    if (existing.status === "archived") {
+      return res.status(403).json({
+        error: "Archivált eseménynaplóhoz már nem adható hozzá megjegyzés.",
+      });
+    }
+    const note = await db.addNote(req.params.id, { text, createdBy });
     res.status(201).json(note);
   } catch (err) {
     res.status(500).json({ error: err.message });

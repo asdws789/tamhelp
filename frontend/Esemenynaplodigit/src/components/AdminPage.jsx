@@ -416,10 +416,28 @@ function AdminPage({
     field,
     value
   ) => {
-    setMasterDataForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    const aliasMap = {
+      organizationEmail: "officialEmail",
+      officialEmail: "organizationEmail",
+      organizationPhone: "phone",
+      phone: "organizationPhone",
+      organizationAddress: "address",
+      address: "organizationAddress",
+      organization: "organizer",
+      organizer: "organization",
+    };
+
+    setMasterDataForm((prev) => {
+      const next = {
+        ...prev,
+        [field]: value,
+      };
+      const alias = aliasMap[field];
+      if (alias) {
+        next[alias] = value;
+      }
+      return next;
+    });
   };
 
   /*

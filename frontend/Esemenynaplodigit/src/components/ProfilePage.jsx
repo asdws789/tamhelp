@@ -120,6 +120,11 @@ function ProfilePage({
       })
       .catch(() => {});
 
+    if (currentUser?.role !== "Admin") {
+      setRegisteredUsers([]);
+      return;
+    }
+
     fetch("http://localhost:3000/api/users")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {

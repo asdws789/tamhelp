@@ -7,7 +7,11 @@ import ProfilePage from "./components/ProfilePage";
 import AdminPage from "./components/AdminPage";
 import { inMemoryDb } from "./data/inMemoryDb";
 import {
+  formatMlszDateToHu,
+  isMatchBeforeOpenWindow,
+  isMatchWithin4HourOpenWindow,
   isMatchOlderThan12Hours,
+  isMatchOlderThan1Week,
   fetchMatchResultFromMockApi,
   fetchAllMlszMatches,
   sendEventLogClosedEmail,
@@ -43,40 +47,279 @@ function App() {
   });
 
   const autoClosedIdsRef = useRef(new Set());
+  const autoArchivedIdsRef = useRef(new Set());
 
-  const loadMatches = async () => {
-    let allMatches = [];
+  const normalizeMlszMatch = (mlszMatch) => ({
+    ...mlszMatch,
+    title: `${mlszMatch.homeTeam} vs ${mlszMatch.awayTeam}`,
+    date: formatMlszDateToHu(mlszMatch.date),
+  });
+
+  const buildNewMatchPayload = (mlszMatch, latestMaster) => {
+    const formattedDate = formatMlszDateToHu(mlszMatch.date);
+    return {
+      id: mlszMatch.id,
+      teamId: mlszMatch.teamId || 323805,
+      competition: mlszMatch.competition,
+      homeTeam: mlszMatch.homeTeam,
+      awayTeam: mlszMatch.awayTeam,
+      title: `${mlszMatch.homeTeam} vs ${mlszMatch.awayTeam}`,
+      date: formattedDate,
+      time: mlszMatch.time,
+      venue: mlszMatch.venue,
+      status: "in_progress",
+      meta: {
+        competitionName: mlszMatch.competition || "",
+        homeTeam: mlszMatch.homeTeam || "",
+        awayTeam: mlszMatch.awayTeam || "",
+        matchDate: formattedDate,
+        matchTime: mlszMatch.time || "",
+        venue: mlszMatch.venue || "",
+        organizer: latestMaster?.organizer || latestMaster?.organization || "Rába ETO SE Győr",
+        headOrganizer: {
+          name: latestMaster?.chiefOrganizer || "",
+          phone: latestMaster?.phone || "",
+        },
+        medicalService: {
+          organization: latestMaster?.healthcareProvider || "",
+          person: "",
+        },
+        disasterProtection: {
+          organization: latestMaster?.disasterProtectionProvider || "",
+          person: "",
+        },
+      },
+    };
+  };
+
+  const createMatchInDb = async (mlszMatch, latestMaster) => {
+    const payload = buildNewMatchPayload(mlszMatch, latestMaster);
+    try {
+      const res = await fetch("http://localhost:3000/api/matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn("[App] Nem sikerült az MLSZ meccs mentése DB-be:", err);
+    }
+    return { ...payload, events: [], notes: [] };
+  };
+
+  /** Syncs changed MLSZ schedule fields into mutable (non-finalized/non-archived) DB matches. */
+  const syncChangedMlszSchedule = async (dbMatch, mlszMatch) => {
+    if (dbMatch.status === "finalized" || dbMatch.status === "archived") {
+      return dbMatch;
+    }
+    const nextDate = formatMlszDateToHu(mlszMatch.date);
+    const nextTitle = `${mlszMatch.homeTeam} vs ${mlszMatch.awayTeam}`;
+    const changed =
+      dbMatch.date !== nextDate ||
+      dbMatch.time !== mlszMatch.time ||
+      dbMatch.venue !== mlszMatch.venue ||
+      dbMatch.homeTeam !== mlszMatch.homeTeam ||
+      dbMatch.awayTeam !== mlszMatch.awayTeam ||
+      dbMatch.competition !== mlszMatch.competition ||
+      dbMatch.title !== nextTitle;
+
+    if (!changed) return dbMatch;
+
+    const patch = {
+      competition: mlszMatch.competition,
+      homeTeam: mlszMatch.homeTeam,
+      awayTeam: mlszMatch.awayTeam,
+      title: nextTitle,
+      date: nextDate,
+      time: mlszMatch.time,
+      venue: mlszMatch.venue,
+      meta: {
+        ...(dbMatch.meta || {}),
+        competitionName: mlszMatch.competition || "",
+        homeTeam: mlszMatch.homeTeam || "",
+        awayTeam: mlszMatch.awayTeam || "",
+        matchDate: nextDate,
+        matchTime: mlszMatch.time || "",
+        venue: mlszMatch.venue || "",
+      },
+    };
+
+    try {
+      const res = await fetch(`http://localhost:3000/api/matches/${dbMatch.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn("[App] MLSZ meccsadat frissítés sikertelen:", err);
+    }
+
+    const updated = { ...dbMatch, ...patch };
+    inMemoryDb.updateMatch(dbMatch.id, patch);
+    return updated;
+  };
+
+  /** Fetches fresh masterData, DB matches & MLSZ API, applies schedule updates and 4h/12h/7d lifecycle rules. */
+  const syncMatchesAndLifecycle = async () => {
+    let latestMaster = masterData;
+    try {
+      const mdRes = await fetch("http://localhost:3000/api/master-data");
+      if (mdRes.ok) {
+        const mdData = await mdRes.json();
+        if (mdData) {
+          latestMaster = mdData;
+          setMasterData(mdData);
+        }
+      }
+    } catch {
+      // Fallback a meglévő masterData állapotra
+    }
+
+    let dbMatches = [];
     try {
       const res = await fetch("http://localhost:3000/api/matches");
       if (res.ok) {
-        allMatches = await res.json();
+        dbMatches = await res.json();
       }
     } catch {
       // Backend nem elérhető, fallback in-memory
     }
 
-    if (allMatches.length === 0) {
-      allMatches = inMemoryDb.getMatches();
+    if (dbMatches.length === 0) {
+      dbMatches = inMemoryDb.getMatches();
     }
 
-    setMatches(allMatches.filter((m) => m.status === "in_progress"));
-    setClosed(allMatches.filter((m) => m.status === "finalized"));
-    setArchived(allMatches.filter((m) => m.status === "archived"));
-
+    let mlszList = [];
     try {
-      const mlszRes = await fetchAllMlszMatches({ status: "scheduled" });
-      const existingIds = new Set(allMatches.map((m) => String(m.id)));
-      const scheduled = (mlszRes.matches || [])
-        .filter((m) => !existingIds.has(String(m.id)))
-        .map((m) => ({
-          ...m,
-          title: `${m.homeTeam} vs ${m.awayTeam}`,
-          date: m.date ? `${m.date.replace(/-/g, ". ")}.` : "",
-        }));
-      setUpcomingMatches(scheduled);
+      const mlszRes = await fetchAllMlszMatches();
+      mlszList = Array.isArray(mlszRes.matches) ? mlszRes.matches : [];
     } catch {
-      setUpcomingMatches([]);
+      mlszList = [];
     }
+
+    const mlszById = new Map(mlszList.map((m) => [String(m.id), m]));
+    const syncedDbMatches = await Promise.all(
+      dbMatches.map(async (dbMatch) => {
+        const apiMatch = mlszById.get(String(dbMatch.id));
+        return apiMatch ? syncChangedMlszSchedule(dbMatch, apiMatch) : dbMatch;
+      })
+    );
+
+    const dbIdSet = new Set(syncedDbMatches.map((m) => String(m.id)));
+    const upcomingScheduled = [];
+
+    for (const rawMlsz of mlszList) {
+      if (dbIdSet.has(String(rawMlsz.id))) continue;
+      const norm = normalizeMlszMatch(rawMlsz);
+
+      if (isMatchWithin4HourOpenWindow(norm)) {
+        const created = await createMatchInDb(rawMlsz, latestMaster);
+        syncedDbMatches.unshift(created);
+        dbIdSet.add(String(created.id));
+      } else if (isMatchBeforeOpenWindow(norm)) {
+        upcomingScheduled.push({ ...norm, status: "scheduled" });
+      }
+    }
+
+    const finalList = [];
+    for (const match of syncedDbMatches) {
+      let current = match;
+
+      if (
+        current.status !== "archived" &&
+        isMatchOlderThan1Week(current) &&
+        !autoArchivedIdsRef.current.has(current.id)
+      ) {
+        autoArchivedIdsRef.current.add(current.id);
+        let archivePayload = { status: "archived" };
+        if (!current.score) {
+          const result = await fetchMatchResultFromMockApi(current.id);
+          if (result?.score) {
+            archivePayload = {
+              ...archivePayload,
+              score: result.score,
+              winner: result.winner || current.winner || "Ismeretlen",
+            };
+          }
+        }
+        try {
+          const res = await fetch(`http://localhost:3000/api/matches/${current.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(archivePayload),
+          });
+          if (res.ok) {
+            current = await res.json();
+          } else {
+            current = { ...current, ...archivePayload };
+          }
+        } catch {
+          inMemoryDb.updateMatch(current.id, archivePayload);
+          current = { ...current, ...archivePayload };
+        }
+      } else if (
+        current.status === "in_progress" &&
+        isMatchOlderThan12Hours(current) &&
+        !isMatchOlderThan1Week(current) &&
+        !autoClosedIdsRef.current.has(current.id)
+      ) {
+        autoClosedIdsRef.current.add(current.id);
+        const result = await fetchMatchResultFromMockApi(current.id);
+        const autoResult = {
+          winner: result?.winner || "Ismeretlen",
+          score: result?.score || "N/A",
+          isAuto: true,
+        };
+        try {
+          const res = await fetch(`http://localhost:3000/api/matches/${current.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: "finalized",
+              score: autoResult.score,
+              winner: autoResult.winner,
+            }),
+          });
+          if (res.ok) {
+            current = await res.json();
+          } else {
+            current = { ...current, status: "finalized", ...autoResult };
+          }
+        } catch {
+          inMemoryDb.updateMatch(current.id, {
+            status: "finalized",
+            score: autoResult.score,
+            winner: autoResult.winner,
+          });
+          current = { ...current, status: "finalized", ...autoResult };
+        }
+        await sendEventLogClosedEmail({
+          match: current,
+          result: autoResult,
+          recipientEmail: latestMaster?.reportEmail || "szeconnect.projektmunka@gmail.com",
+          reason: "auto-12h",
+        });
+      }
+
+      finalList.push(current);
+    }
+
+    const openWindowMatches = finalList.filter(
+      (m) => m.status === "in_progress" && isMatchWithin4HourOpenWindow(m)
+    );
+    const preWindowDbMatches = finalList
+      .filter((m) => m.status === "in_progress" && isMatchBeforeOpenWindow(m))
+      .map((m) => ({ ...m, status: "scheduled" }));
+
+    setMatches(openWindowMatches);
+    setClosed(finalList.filter((m) => m.status === "finalized"));
+    setArchived(finalList.filter((m) => m.status === "archived"));
+    setUpcomingMatches([...preWindowDbMatches, ...upcomingScheduled]);
   };
 
   useEffect(() => {
@@ -87,14 +330,7 @@ function App() {
         setDbStatus({ connected: false, type: "In-Memory Database" })
       );
 
-    fetch("http://localhost:3000/api/master-data")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data) setMasterData(data);
-      })
-      .catch(() => {});
-
-    loadMatches();
+    void syncMatchesAndLifecycle();
   }, []);
 
   const syncMatchInState = (updatedMatch) => {
@@ -214,37 +450,6 @@ function App() {
   };
 
   /*
-   * Automatikus lezárás ellenőrzése: 12 órával a meccs kezdete után
-   * az eredményt a Mock MLSZ API-ból szerezzük be, és kiküldjük az e-mailt.
-   */
-  useEffect(() => {
-    if (matches.length === 0) return;
-
-    matches.forEach(async (m) => {
-      if (
-        m.status === "in_progress" &&
-        isMatchOlderThan12Hours(m) &&
-        !autoClosedIdsRef.current.has(m.id)
-      ) {
-        autoClosedIdsRef.current.add(m.id);
-        const result = await fetchMatchResultFromMockApi(m.id);
-        const autoResult = {
-          winner: result?.winner || "Ismeretlen",
-          score: result?.score || "N/A",
-          isAuto: true,
-        };
-        await handleFinalizeMatch(m.id, autoResult);
-        await sendEventLogClosedEmail({
-          match: m,
-          result: autoResult,
-          recipientEmail: masterData?.reportEmail || "szeconnect.projektmunka@gmail.com",
-          reason: "auto-12h",
-        });
-      }
-    });
-  }, [matches, masterData]);
-
-  /*
    * Aktuális menüpont / eseménynapló státusz megnevezése.
    *
    * Ha nincs megnyitva eseménynapló:
@@ -266,6 +471,9 @@ function App() {
 
         case "archived":
           return "Archivált";
+
+        case "scheduled":
+          return "Közelgő (csak megtekinthető)";
 
         default:
           return "Eseménynapló";
@@ -317,86 +525,46 @@ function App() {
   };
 
   /*
-   * Mérkőzés kiválasztása: friss adatokat kérünk a backendtől ha elérhető.
+   * Mérkőzés kiválasztása:
+   * - 4 órán kívüli mérkőzés csak megtekinthető ("scheduled"), DB állapot módosítása nélkül
+   * - megnyitott / lezárt / archivált naplónál friss adatokat kérünk a backendtől
    */
   const handleClick = async (match) => {
+    const readOnlyPreWindow = isMatchBeforeOpenWindow(match);
+    setMenuOpen(false);
+
+    if (readOnlyPreWindow) {
+      setSelectedLog(match);
+      setEditorStatus("scheduled");
+      return;
+    }
+
+    if (match.status === "scheduled" && isMatchWithin4HourOpenWindow(match)) {
+      const created = await createMatchInDb(match, masterData);
+      syncMatchInState(created);
+      setUpcomingMatches((prev) =>
+        prev.filter((m) => String(m.id) !== String(created.id))
+      );
+      setSelectedLog(created);
+      setEditorStatus(created.status);
+      return;
+    }
+
     setSelectedLog(match);
     setEditorStatus(match.status);
-    setMenuOpen(false);
 
     try {
       const res = await fetch(`http://localhost:3000/api/matches/${match.id}`);
       if (res.ok) {
         const fresh = await res.json();
         setSelectedLog(fresh);
-        setEditorStatus(fresh.status);
+        setEditorStatus(
+          isMatchBeforeOpenWindow(fresh) ? "scheduled" : fresh.status
+        );
       }
     } catch {
       // Offline fallback: marad a meglévő objektum
     }
-  };
-
-  /*
-   * Következő (MLSZ) mérkőzés megnyitása / importálása az adatbázisba.
-   */
-  const handleOpenUpcomingMatch = async (mlszMatch) => {
-    const newMatchPayload = {
-      id: mlszMatch.id,
-      teamId: mlszMatch.teamId || 323805,
-      competition: mlszMatch.competition,
-      homeTeam: mlszMatch.homeTeam,
-      awayTeam: mlszMatch.awayTeam,
-      title: mlszMatch.title,
-      date: mlszMatch.date,
-      time: mlszMatch.time,
-      venue: mlszMatch.venue,
-      status: "in_progress",
-      meta: {
-        competitionName: mlszMatch.competition || "",
-        homeTeam: mlszMatch.homeTeam || "",
-        awayTeam: mlszMatch.awayTeam || "",
-        matchDate: mlszMatch.date || "",
-        matchTime: mlszMatch.time || "",
-        venue: mlszMatch.venue || "",
-        organizer: masterData?.organizer || masterData?.organization || "Rába ETO SE Győr",
-        headOrganizer: {
-          name: masterData?.chiefOrganizer || "",
-          phone: masterData?.phone || "",
-        },
-        medicalService: {
-          organization: masterData?.healthcareProvider || "",
-          person: "",
-        },
-        disasterProtection: {
-          organization: masterData?.disasterProtectionProvider || "",
-          person: "",
-        },
-      },
-    };
-
-    try {
-      const res = await fetch("http://localhost:3000/api/matches", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newMatchPayload),
-      });
-      if (res.ok) {
-        const created = await res.json();
-        setMatches((prev) => [
-          created,
-          ...prev.filter((m) => String(m.id) !== String(created.id)),
-        ]);
-        setUpcomingMatches((prev) =>
-          prev.filter((m) => String(m.id) !== String(created.id))
-        );
-        handleClick(created);
-        return;
-      }
-    } catch (err) {
-      console.warn("[App] Nem sikerült az MLSZ meccs mentése DB-be:", err);
-    }
-
-    handleClick({ ...newMatchPayload, events: [], notes: [] });
   };
 
   /*
@@ -418,6 +586,7 @@ function App() {
           setView("home");
           setSelectedLog(null);
           setEditorStatus(null);
+          void syncMatchesAndLifecycle();
         }}
       />
     );
@@ -1044,7 +1213,7 @@ function App() {
                     Következő mérkőzések
                   </h2>
 
-                  {renderTable(upcomingMatches, false, handleOpenUpcomingMatch)}
+                  {renderTable(upcomingMatches, false, handleClick)}
                 </div>
 
               </>
@@ -1056,9 +1225,7 @@ function App() {
 
           {!selectedLog &&
             view === "upcoming" &&
-            renderTable([...matches, ...upcomingMatches], false, (m) =>
-              m.status === "scheduled" ? handleOpenUpcomingMatch(m) : handleClick(m)
-            )}
+            renderTable([...matches, ...upcomingMatches], false, handleClick)}
 
           {/* =================================================
               LEZÁRT

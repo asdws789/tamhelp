@@ -350,19 +350,26 @@ const inMemoryDb = {
   },
 
   updateMasterData(data) {
+    const organization = data.organization ?? data.organizer ?? this.masterData.organization;
+    const officialEmail =
+      data.organizationEmail ?? data.officialEmail ?? this.masterData.officialEmail;
+    const phone = data.organizationPhone ?? data.phone ?? this.masterData.phone;
+    const address =
+      data.organizationAddress ?? data.address ?? this.masterData.address;
     const normalized = {
       ...data,
-      officialEmail: data.officialEmail ?? data.organizationEmail ?? this.masterData.officialEmail,
-      phone: data.phone ?? data.organizationPhone ?? this.masterData.phone,
-      address: data.address ?? data.organizationAddress ?? this.masterData.address,
-      organizer: data.organizer ?? data.organization ?? this.masterData.organizer,
+      organization,
+      officialEmail,
+      organizationEmail: officialEmail,
+      phone,
+      organizationPhone: phone,
+      address,
+      organizationAddress: address,
+      organizer: data.organizer ?? organization,
     };
     this.masterData = {
       ...this.masterData,
       ...normalized,
-      organizationEmail: normalized.officialEmail,
-      organizationPhone: normalized.phone,
-      organizationAddress: normalized.address,
       id: 1,
     };
     return { ...this.masterData };

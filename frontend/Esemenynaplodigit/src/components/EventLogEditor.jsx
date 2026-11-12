@@ -1336,6 +1336,7 @@ function EventLogEditor({
   const isEditable = status === "in_progress";
   const isFinalized = status === "finalized";
   const isArchived = status === "archived";
+  const isScheduledReadOnly = status === "scheduled";
 
   /* ==========================================================
      META MÓDOSÍTÁS
@@ -1715,8 +1716,25 @@ function EventLogEditor({
 
   if (
     isFinalized ||
-    isArchived
+    isArchived ||
+    isScheduledReadOnly
   ) {
+    const headerTitle = isFinalized
+      ? "Lezárt eseménynapló"
+      : isArchived
+      ? "Archivált eseménynapló"
+      : "Mérkőzés adatai (csak megtekinthető)";
+    const statusBadgeText = isFinalized
+      ? "Lezárt"
+      : isArchived
+      ? "Archivált"
+      : "Még nem nyitott (4 órán kívüli)";
+    const statusBadgeClass = isFinalized
+      ? "border border-amber-300 bg-amber-100 text-amber-800"
+      : isArchived
+      ? "border border-gray-300 bg-gray-100 text-gray-800"
+      : "border border-blue-300 bg-blue-100 text-blue-800";
+
     return (
       <div
         className="
@@ -1737,16 +1755,12 @@ function EventLogEditor({
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">
-                {isFinalized ? "Lezárt eseménynapló" : "Archivált eseménynapló"}
+                {headerTitle}
               </h1>
               <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  isFinalized
-                    ? "border border-amber-300 bg-amber-100 text-amber-800"
-                    : "border border-gray-300 bg-gray-100 text-gray-800"
-                }`}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass}`}
               >
-                {isFinalized ? "Lezárt" : "Archivált"}
+                {statusBadgeText}
               </span>
             </div>
             <p className="mt-1 text-sm text-gray-500">
@@ -1767,28 +1781,32 @@ function EventLogEditor({
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={() =>
-                window.open(
-                  `http://localhost:3000/api/matches/${match?.id}/pdf`,
-                  "_blank"
-                )
-              }
-              className="inline-flex items-center gap-2 rounded-xl bg-[#2E7D32] hover:bg-[#256629] px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all cursor-pointer"
-              title="PDF összefoglaló megnyitása új lapon"
-            >
-              <span>PDF Megtekintése</span>
-            </button>
+            {!isScheduledReadOnly && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.open(
+                      `http://localhost:3000/api/matches/${match?.id}/pdf`,
+                      "_blank"
+                    )
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl bg-[#2E7D32] hover:bg-[#256629] px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all cursor-pointer"
+                  title="PDF összefoglaló megnyitása új lapon"
+                >
+                  <span>PDF Megtekintése</span>
+                </button>
 
-            <a
-              href={`http://localhost:3000/api/matches/${match?.id}/pdf?download=1`}
-              download={`esemenynaplo-${match?.id}.pdf`}
-              className="inline-flex items-center gap-2 rounded-xl bg-neutral-800 hover:bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all cursor-pointer"
-              title="PDF összefoglaló letöltése"
-            >
-              <span>PDF Letöltése</span>
-            </a>
+                <a
+                  href={`http://localhost:3000/api/matches/${match?.id}/pdf?download=1`}
+                  download={`esemenynaplo-${match?.id}.pdf`}
+                  className="inline-flex items-center gap-2 rounded-xl bg-neutral-800 hover:bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all cursor-pointer"
+                  title="PDF összefoglaló letöltése"
+                >
+                  <span>PDF Letöltése</span>
+                </a>
+              </>
+            )}
 
             {isFinalized && (
               <button
@@ -1805,6 +1823,11 @@ function EventLogEditor({
         </div>
 
         {/* Értesítési sávok */}
+        {isScheduledReadOnly && (
+          <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+            Ez a mérkőzés még több mint 4 órával a kezdés előtt van, ezért jelenleg csak az adatai tekinthetők meg. A szerkesztés a kezdés előtt 4 órával válik elérhetővé.
+          </div>
+        )}
         {emailNotification && (
           <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
             {emailNotification}
