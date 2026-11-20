@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "db:init": "node db/init.js",
-    "test": "node tests/requirements.test.js"
+    "test": "node tests/requirements.test.js",
+    "test:automation": "node tests/automation.test.js"
   },
   "keywords": [],
   "author": "",

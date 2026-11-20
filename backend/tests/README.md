@@ -74,3 +74,18 @@ A teszt induláskor elmenti az eredeti törzsadatokat, felhasználókat és mér
 - törli a létrehozott tesztmérkőzéseket (`999xxx`) és tesztfelhasználókat,
 - visszaállítja az eredeti törzsadatokat,
 - PostgreSQL használata esetén közvetlen SQL-lel is garantálja az érintett táblák és szekvenciák eredeti állapotát.
+
+---
+
+## Automatizálási teszt (12 órás lezárás és 1 hetes archiválás)
+
+Az időalapú automatizmusok célzott ellenőrzésére a [`automation.test.js`](./automation.test.js) áll rendelkezésre.
+
+- **Futtatás:** `npm --prefix backend run test:automation` (vagy `node backend/tests/automation.test.js`)
+- **Önálló szerverkezelés:** Ha a frontend vagy a backend éppen nem fut, a script átmenetileg elindítja őket, majd a végén (`finally` blokkban) leállítja az általa indított folyamatokat és törli a `998001`–`998005` tesztadatokat (valamint a teszt által küldött `sent_emails` bejegyzéseket).
+- **Ellenőrzött pontok (`A1`–`A5`):**
+  - `A1`: A 12 órás küszöb előtti mérkőzés (`-11h`) aktív (`in_progress`) marad, nem záródik le és nem küld e-mailt.
+  - `A2`: A 12 órán túli mérkőzés (`-13h`) bejelentkezéskor automatikusan `finalized` lesz az MLSZ API végeredményével, és elindul az értesítő e-mail küldése a törzsadatokban tárolt címre.
+  - `A3`: Az 1 hetes küszöb előtti lezárt napló (`-6 nap`) megőrzi a `finalized` státuszt.
+  - `A4`: Az 1 héten túli lezárt napló (`-8 nap`) automatikusan `archived` állapotba lép, és a szerver `403`-mal tiltja a módosítást és az új kommenteket.
+  - `A5`: Az 1 héten túl nyitva maradt napló (`-9 nap`, `in_progress`) közvetlenül `archived` státuszba lép az API végeredményével, felesleges 12 órás e-mail nélkül.
