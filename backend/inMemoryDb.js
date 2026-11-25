@@ -1,5 +1,6 @@
 // In-memory fallback adatbázis, ha a PostgreSQL nem érhető el.
 // Struktúrája és metódusai pontosan megegyeznek a PostgreSQL adatréteggel.
+const { hashPassword, verifyPassword } = require("./db/password");
 
 const DEFAULT_MASTER_DATA = {
   id: 1,
@@ -22,7 +23,7 @@ const inMemoryDb = {
     {
       id: 1,
       username: "Admin",
-      password: "Adminjelszo",
+      password: hashPassword("Adminjelszo"),
       name: "Adminisztrátor",
       email: "admin@eto.hu",
       phone: "+36 30 987 6543",
@@ -31,7 +32,7 @@ const inMemoryDb = {
     {
       id: 2,
       username: "User1",
-      password: "Userjelszo",
+      password: hashPassword("Userjelszo"),
       name: "Biztonsági vezető",
       email: "user1@eto.hu",
       phone: "+36 30 123 4567",
@@ -40,7 +41,7 @@ const inMemoryDb = {
     {
       id: 3,
       username: "szeconnect",
-      password: "SzeConnect2026!",
+      password: hashPassword("SzeConnect2026!"),
       name: "SZE Connect Projektvezető",
       email: "szeconnect.projektmunka@gmail.com",
       phone: "+36 30 555 9876",
@@ -288,7 +289,7 @@ const inMemoryDb = {
     const user = this.users.find(
       (u) =>
         u.username.toLowerCase() === String(username || "").trim().toLowerCase() &&
-        u.password === password
+        verifyPassword(password, u.password)
     );
     return this._sanitizeUser(user);
   },
@@ -299,7 +300,7 @@ const inMemoryDb = {
     const newUser = {
       id: nextId,
       username: String(userData.username || "").trim(),
-      password: userData.password || "Eto2026!",
+      password: hashPassword(userData.password || "Eto2026!"),
       name: String(userData.name || "").trim(),
       email: String(userData.email || "").trim(),
       phone: String(userData.phone || "").trim(),
@@ -322,7 +323,7 @@ const inMemoryDb = {
       role: userData.role !== undefined ? userData.role : current.role,
       password:
         userData.password && String(userData.password).trim() !== ""
-          ? userData.password
+          ? hashPassword(userData.password)
           : current.password,
     };
     return this._sanitizeUser(this.users[idx]);
@@ -331,10 +332,10 @@ const inMemoryDb = {
   updateUserPassword(id, currentPassword, newPassword) {
     const idx = this.users.findIndex((u) => String(u.id) === String(id));
     if (idx === -1) return { error: "A felhasználó nem található." };
-    if (this.users[idx].password !== currentPassword) {
+    if (!verifyPassword(currentPassword, this.users[idx].password)) {
       return { error: "A jelenlegi jelszó hibás." };
     }
-    this.users[idx].password = newPassword;
+    this.users[idx].password = hashPassword(newPassword);
     return { ok: true };
   },
 

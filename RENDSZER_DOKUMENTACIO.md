@@ -41,10 +41,11 @@ Három tábla szándékosan **nem** rendelkezik fizikai `FOREIGN KEY` kényszerr
 
 1. **`users` (Felhasználók és jogosultságok)**
    * **Oszlopok:** `id SERIAL PRIMARY KEY`, `username VARCHAR(100) UNIQUE NOT NULL`, `password VARCHAR(255) NOT NULL`, `name VARCHAR(150) NOT NULL`, `email VARCHAR(150) NOT NULL`, `phone VARCHAR(50)`, `role VARCHAR(50) NOT NULL DEFAULT 'Biztonsági vezető'`, `created_at`.
+   * **Jelszótárolás:** A `password` oszlop kizárólag sóval ellátott kriptográfiai **`scrypt`** jelszó-hasht tárol `scrypt$<32 hex só>$<128 hex kulcs>` formátumban ([`backend/db/password.js`](./backend/db/password.js)). Már a [`schema.sql`](./backend/db/schema.sql) kezdőadatai is hashelve szerepelnek, a régebbi plaintext sorokat pedig az alkalmazás induláskor és a `db:init` futtatásakor (`migratePlaintextPasswords`) automatikusan migrálja.
    * **Miért nincs összekötve `events` / `notes` / `matches` táblákkal?**
      * Ha egy biztonsági vezetőt később törölnek vagy átneveznek az `AdminPage`-en, egy fizikai FK kényszer megakadályozná a törlést, vagy `ON DELETE SET NULL` mellett elveszne a dokumentációból, hogy **ki** rögzítette az eseményt.
      * Ehelyett a rendszer **szöveges pillanatfelvételt** tárol az `events.created_by`, `notes.created_by` és a `matches.meta.eventLogLeader` mezőkben. Így a lezárt és archivált hivatalos naplók utólag sem változnak meg egy adminisztrátori felhasználó-módosítás miatt.
-   * **Felhasználása:** Bejelentkezés ([`findUser`](./backend/db/index.js#L175-L188)), profiladatok és jelszó frissítése ([`ProfilePage.jsx`](./frontend/Esemenynaplodigit/src/components/ProfilePage.jsx)), felhasználók CRUD kezelése ([`AdminPage.jsx`](./frontend/Esemenynaplodigit/src/components/AdminPage.jsx)).
+   * **Felhasználása:** Bejelentkezés [`scrypt` + `timingSafeEqual` ellenőrzéssel](./backend/db/index.js#L182-L200), profiladatok és jelszó frissítése ([`ProfilePage.jsx`](./frontend/Esemenynaplodigit/src/components/ProfilePage.jsx)), felhasználók CRUD kezelése ([`AdminPage.jsx`](./frontend/Esemenynaplodigit/src/components/AdminPage.jsx)).
 
 2. **`master_data` (Szervezeti törzsadatok és partnerek)**
    * **Oszlopok:** `id SERIAL PRIMARY KEY`, `organization`, `official_email`, `report_email`, `phone`, `address`, `organizer`, `chief_organizer`, `healthcare_provider`, `disaster_protection_provider`.
@@ -181,6 +182,7 @@ A backend ([`backend/index.js`](./backend/index.js#L657-L763)) beolvassa az adat
 | **Kódminőség** | ESLint (`eslint`, `@eslint/js`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`) | `ESLint 10.2.1` | Statikus JS/React kódellenőrzés |
 | **Backend futtató & API** | Node.js + Express (`express`, `cors`) | `Express 5.2.1`, `cors 2.8.6` | REST API végpontok, statikus erőforrások és üzleti vezérlés |
 | **Adatbázis** | PostgreSQL + `pg` (`node-postgres`), `Docker Compose` | `postgres:16-alpine`, `pg 8.23.1` | Perzisztens relációs + JSONB adattárolás, fallback in-memory motorral |
+| **Kriptográfia & Jelszóvédelem** | Node.js beépített `crypto` modul (`scrypt`, `randomBytes`, `timingSafeEqual`) | Node.js core API | Sóval ellátott jelszó-hashelés és időzítésbiztos ellenőrzés |
 | **PDF motor & E2E** | Puppeteer (`puppeteer`) + rendszer Chrome/Edge | `puppeteer 25.1.0` | Headless Chromium alapú HTML→A4 PDF renderelés és E2E böngészőtesztelés |
 | **E-mail küldés** | Nodemailer (`nodemailer`) + Gmail SMTP | `nodemailer 7.0.9` | Hivatalos értesítő e-mailek küldése dinamikus PDF melléklettel |
 
@@ -189,20 +191,20 @@ A backend ([`backend/index.js`](./backend/index.js#L657-L763)) beolvassa az adat
 ## 7. Adatbiztonsági értékelés
 
 ### Jelenleg beépített védelmek
+* **Sóval ellátott jelszó-hashelés (`scrypt`):** A felhasználói jelszavak sem a PostgreSQL `users` táblában, sem a szerveroldali [`backend/inMemoryDb.js`](./backend/inMemoryDb.js) fallbackban nem szerepelnek nyílt szövegként. Minden jelszó egyedi 16 bájtos véletlen sóval (`crypto.randomBytes`) és 64 bájtos `scrypt` kulccsal (`N=16384, r=8, p=1`) tárolódik ([`backend/db/password.js`](./backend/db/password.js)), az ellenőrzés pedig `crypto.timingSafeEqual` segítségével történik; a meglévő plaintext rekordok induláskor/`db:init`-kor automatikusan migrálódnak.
 * **SQL Injection elleni védelem:** A [`backend/db/index.js`](./backend/db/index.js) minden lekérdezése kizárólag paraméterezett `$1, $2, ...` lekérdezéseket használ (`pool.query(..., [...])`), nincs szöveges SQL-összefűzés.
 * **XSS elleni védelem:** A PDF- és e-mail HTML generátor ([`escapeHtml`](./backend/index.js#L38-L45)) szűri a speciális HTML karaktereket (`& < > " '`), a React JSX pedig alapértelmezetten escape-eli a megjelenített tartalmakat.
 * **Szerveroldali állapot-integritás:** A `PUT /api/matches/:id` és `POST /api/matches/:id/notes` HTTP `403`-mal megakadályozza a már lezárt (`finalized`) naplók utólagos tartalmi módosítását, valamint az archivált (`archived`) naplók módosítását és kommentelését.
-* **Jelszavak kihagyása a listákból:** A felhasználói `SELECT` és `RETURNING` lekérdezések nem adják vissza a `password` oszlopot.
+* **Jelszóhashek elrejtése a válaszokból:** Sem a felhasználói `SELECT`/`RETURNING` lekérdezések, sem a `POST /api/login` (`findUser`) nem küldik vissza a jelszó mezőt vagy a hash-t a kliensnek.
 * **Mock API kulcs ellenőrzés:** Az `/api/mlsz/matches` végpontok ellenőrzik az `x-api-key` fejlécet (`401`).
 
 ### Jelenlegi sebezhetőségek és élesítés előtti kötelező teendők
-1. **Plaintext jelszavak:** A jelszavak jelenleg titkosítatlanul, sima szövegként (`Adminjelszo`, `Userjelszo`, stb.) tárolódnak a `users` táblában, és direkt egyezéssel (`password = $2`) ellenőrződnek. Élesben kötelező **`bcrypt`** vagy **`argon2`** hashelés.
-2. **Szerveroldali hitelesítés (AuthN) és jogosultságkezelés (RBAC) hiánya:** A `POST /api/login` nem ad ki JWT tokent vagy `HttpOnly` munkamenet-sütit, a backend API végpontok (`GET/POST/PUT/DELETE /api/users`, `PUT /api/master-data`, `PUT /api/matches/:id`, `POST /api/send-email`, `GET .../pdf`) hitelesítés nélkül hívhatók közvetlenül. Élesítéshez JWT/Session middleware és szerepkör-ellenőrzés (`requireRole("Admin")`) kell minden backend végpont elé.
-3. **Kódba égetett hitelesítő adatok (Secrets) és kliensoldali jelszavak:**
+1. **Szerveroldali hitelesítés (AuthN) és jogosultságkezelés (RBAC) hiánya:** A `POST /api/login` nem ad ki JWT tokent vagy `HttpOnly` munkamenet-sütit, a backend API végpontok (`GET/POST/PUT/DELETE /api/users`, `PUT /api/master-data`, `PUT /api/matches/:id`, `POST /api/send-email`, `GET .../pdf`) hitelesítés nélkül hívhatók közvetlenül. Élesítéshez JWT/Session middleware és szerepkör-ellenőrzés (`requireRole("Admin")`) kell minden backend végpont elé.
+2. **Kódba égetett hitelesítő adatok (Secrets) és kliensoldali tesztfiókok:**
    * A [`backend/index.js`](./backend/index.js#L30-L36) közvetlenül a kódban tartalmazza a `GMAIL_USER` és `GMAIL_APP_PASSWORD` értékét (pedig a [`.env.example`](./backend/.env.example) már előkészítette ezeket `process.env`-re).
-   * A [`frontend/Esemenynaplodigit/src/data/inMemoryDb.js`](./frontend/Esemenynaplodigit/src/data/inMemoryDb.js#L4-L32) a böngésző JS bundle-jébe csomagolva tárolja a jelszavakat offline fallbackhez — éles buildből ezt teljes egészében el kell távolítani.
-4. **Hálózati és szállítási biztonság:** A `cors()` jelenleg minden origót engedélyez (`*`), nincs HTTPS/TLS, nincs `helmet` biztonsági HTTP-fejléc és nincs brute-force elleni rate limiting (pl. `express-rate-limit` a `/api/login`-ra).
-5. **Adatvédelem (GDPR):** A személyes elérhetőségek (telefonszám, e-mail, felelősök adatai) védelme érdekében szükséges a titkosított tárolás/átvitel, auditnaplózás és hozzáférés-korlátozás a PDF végpontokon is.
+   * A [`frontend/Esemenynaplodigit/src/data/inMemoryDb.js`](./frontend/Esemenynaplodigit/src/data/inMemoryDb.js#L4-L32) a böngésző JS bundle-jébe csomagolva tárolja a tesztjelszavakat offline fallbackhez — éles buildből ezt teljes egészében el kell távolítani.
+3. **Hálózati és szállítási biztonság:** A `cors()` jelenleg minden origót engedélyez (`*`), nincs HTTPS/TLS, nincs `helmet` biztonsági HTTP-fejléc és nincs brute-force elleni rate limiting (pl. `express-rate-limit` a `/api/login`-ra).
+4. **Adatvédelem (GDPR):** A személyes elérhetőségek (telefonszám, e-mail, felelősök adatai) védelme érdekében szükséges a titkosított tárolás/átvitel, auditnaplózás és hozzáférés-korlátozás a PDF végpontokon is.
 
 ---
 
@@ -243,8 +245,9 @@ A rendszer **háromrétegű kliens–szerver architektúrát** követ (`SPA Fron
 
 ### Backend felépítés (`backend/`)
 * **API & vezérlési réteg ([`index.js`](./backend/index.js)):** Express 5 szerver `3000`-es porton (`cors`, `express.json`). Kezeli a Mock MLSZ API-t, a felhasználó-autentikációt és CRUD-ot, a törzsadatokat, a mérkőzések és kommentek életciklusát (szerveroldali `403` állapotvédelemmel), a PDF végpontot és a Gmail SMTP küldést.
-* **Adatelérési absztrakció ([`db/index.js`](./backend/db/index.js)):** Egyetlen egységes interfészen (`db`) keresztül kezeli a PostgreSQL `pg.Pool` lekérdezéseket és az [`inMemoryDb.js`](./backend/inMemoryDb.js) memóriabeli objektumot; induláskor lefuttatja a [`schema.sql`](./backend/db/schema.sql) `CREATE TABLE IF NOT EXISTS` és idempotens kezdőadat (`seed`) utasításait.
-* **Adatbázis inicializáló ([`db/init.js`](./backend/db/init.js)):** Külön `npm run db:init` szkript az adatbázis létrehozására és sématelepítésre.
+* **Jelszó-biztonsági modul ([`db/password.js`](./backend/db/password.js)):** Sóval ellátott `scrypt` jelszó-hashelés (`hashPassword`), időzítésbiztos ellenőrzés (`verifyPassword`) és meglévő plaintext rekordok automatikus migrációja (`migratePlaintextPasswords`).
+* **Adatelérési absztrakció ([`db/index.js`](./backend/db/index.js)):** Egyetlen egységes interfészen (`db`) keresztül kezeli a PostgreSQL `pg.Pool` lekérdezéseket és az [`inMemoryDb.js`](./backend/inMemoryDb.js) memóriabeli objektumot; induláskor lefuttatja a [`schema.sql`](./backend/db/schema.sql) `CREATE TABLE IF NOT EXISTS` és idempotens kezdőadat (`seed`) utasításait, majd a jelszó-migrációt.
+* **Adatbázis inicializáló ([`db/init.js`](./backend/db/init.js)):** Külön `npm run db:init` szkript az adatbázis létrehozására, sématelepítésre és a jelszó-migráció futtatására.
 
 ### Frontend felépítés (`frontend/Esemenynaplodigit/src/`)
 * **Központi állapotkezelő és életciklus-vezérlő ([`App.jsx`](./frontend/Esemenynaplodigit/src/App.jsx)):** Kezeli a bejelentkezett felhasználót, a nézeteket (`home`, `upcoming`, `closed`, `archived`, `profile`, `admin`), a menüsávokat és a `syncMatchesAndLifecycle` motort (4 órás nyitás, MLSZ változáskövetés, 12 órás auto-lezárás, 7 napos auto-archiválás).
@@ -289,12 +292,13 @@ A PDF összefoglalók előállítása kizárólag a szerveroldalon történik ([
 * **Megbízhatóság és hibatűrés:** Dupla fallback architektúra (PostgreSQL kiesésekor szerveroldali In-Memory DB; backend kiesésekor kliensoldali `inMemoryDb.js`), tranzakcionális (`BEGIN/COMMIT/ROLLBACK`) eseménymentés.
 * **Adatkonzisztencia:** A frontend nézetek (Főnézet, Következő, Lezárt, Archivált) és a PDF egyaránt közvetlenül az adatbázis állapotából táplálkoznak; a lezárt/archivált tartalmat `403`-as backend ellenőrzés védi.
 * **Használhatóság és hordozhatóság:** Tailwind alapú reszponzív kialakítás, magyar nyelvű hiba- és visszajelző üzenetek, Docker Compose opció vagy natív lokális PostgreSQL támogatás.
-* **Biztonsági korlát (fejlődési pont):** Funkcionálisan teljes az alkalmazás, de produkciós környezet előtti biztonsági követelményekből még hiányzik a szerveroldali token-alapú AuthN/RBAC, a jelszó-hashelés és a titkok környezeti változóba mozgatása.
+* **Biztonsági korlát (fejlődési pont):** Funkcionálisan teljes az alkalmazás (a szerveroldali és adatbázis-beli jelszavak immár `scrypt`-tel hasheltek), ugyanakkor produkciós környezet előtti további követelmény a szerveroldali token-alapú AuthN/RBAC és a titkok környezeti változóba mozgatása.
 
 ### 12.3. Mit és hogyan ellenőriz a rendszer?
 * **Futásidejű (runtime) ellenőrzések:**
   * API kulcs ellenőrzés az MLSZ végpontokon (`x-api-key`, `401`).
-  * Kötelező mezők validálása: felhasználó létrehozáskor (`400`), jelszócserekor régi jelszó ellenőrzése, kommentnél nem üres szöveg (`400`), manuális lezárásnál győztes és végeredmény megléte (modal validáció).
+  * Hitelesítéskor és jelszócserekor sóval ellátott `scrypt` + `crypto.timingSafeEqual` jelszóhash-ellenőrzés (`findUser`, `updateUserPassword`).
+  * Kötelező mezők validálása: felhasználó létrehozáskor (`400`), kommentnél nem üres szöveg (`400`), manuális lezárásnál győztes és végeredmény megléte (modal validáció).
   * Státusz-gárdák mind UI (`isEditable`, `isFinalized`, `isArchived`, `isScheduledReadOnly`), mind API szinten (`403` finalized/archived `PUT` és archived `POST .../notes` esetén).
   * Adatbázis elérhetőségének folyamatos visszajelzése (`/api/db/status`, `/health`).
 * **Automatizált E2E teszt-ellenőrzések (20 független teszteset):**

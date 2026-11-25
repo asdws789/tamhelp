@@ -3,6 +3,11 @@ const { Pool } = require("pg");
 const fs = require("fs");
 const path = require("path");
 const inMemoryDb = require("../inMemoryDb");
+const {
+  hashPassword,
+  verifyPassword,
+  migratePlaintextPasswords,
+} = require("./password");
 
 // .env betöltése ha létezik
 const envPath = path.join(__dirname, "..", ".env");
@@ -138,6 +143,8 @@ async function checkAndInitPostgres() {
       console.log("[DB] PostgreSQL séma és kezdőadatok sikeresen ellenőrizve/létrehozva.");
     }
 
+    await migratePlaintextPasswords(client);
+
     client.release();
     isPostgresConnected = true;
     return true;
@@ -176,10 +183,15 @@ const db = {
     if (isPostgresConnected) {
       try {
         const res = await pool.query(
-          "SELECT id, username, name, email, phone, role FROM users WHERE LOWER(username) = LOWER($1) AND password = $2",
-          [String(username || "").trim(), password]
+          "SELECT id, username, password, name, email, phone, role FROM users WHERE LOWER(username) = LOWER($1)",
+          [String(username || "").trim()]
         );
-        return res.rows[0] || null;
+        const row = res.rows[0];
+        if (!row || !verifyPassword(password, row.password)) {
+          return null;
+        }
+        const { password: _, ...safeUser } = row;
+        return safeUser;
       } catch (err) {
         console.error("[DB] Hiba a bejelentkezésnél:", err.message);
       }
@@ -196,7 +208,7 @@ const db = {
            RETURNING id, username, name, email, phone, role`,
           [
             String(userData.username || "").trim(),
-            userData.password || "Eto2026!",
+            hashPassword(userData.password || "Eto2026!"),
             String(userData.name || "").trim(),
             String(userData.email || "").trim(),
             String(userData.phone || "").trim(),
@@ -234,7 +246,7 @@ const db = {
             userData.phone ?? null,
             userData.role ?? null,
             hasPassword,
-            hasPassword ? userData.password : null,
+            hasPassword ? hashPassword(userData.password) : null,
             id,
           ]
         );
@@ -255,11 +267,11 @@ const db = {
           [id]
         );
         if (check.rowCount === 0) return { error: "A felhasználó nem található." };
-        if (check.rows[0].password !== currentPassword) {
+        if (!verifyPassword(currentPassword, check.rows[0].password)) {
           return { error: "A jelenlegi jelszó hibás." };
         }
         await pool.query("UPDATE users SET password = $1 WHERE id = $2", [
-          newPassword,
+          hashPassword(newPassword),
           id,
         ]);
         return { ok: true };

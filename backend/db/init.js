@@ -5,6 +5,7 @@
 const { Client } = require("pg");
 const fs = require("fs");
 const path = require("path");
+const { migratePlaintextPasswords } = require("./password");
 
 // .env betöltése ha létezik
 const envPath = path.join(__dirname, "..", ".env");
@@ -65,6 +66,7 @@ async function init() {
     const schemaPath = path.join(__dirname, "schema.sql");
     const sql = fs.readFileSync(schemaPath, "utf-8");
     await appDbClient.query(sql);
+    await migratePlaintextPasswords(appDbClient);
     console.log("A táblák és a kezdőadatok (users, matches, master_data) sikeresen létrejöttek!");
 
     await appDbClient.end();

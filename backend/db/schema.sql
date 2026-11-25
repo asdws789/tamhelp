@@ -83,11 +83,12 @@ CREATE TABLE IF NOT EXISTS sent_emails (
 -- KEZDŐADATOK BESZÚRÁSA (SEED DATA)
 -- =======================================================
 
+-- Kezdő felhasználók jelszavai sóval ellátott scrypt hash formátumban
 INSERT INTO users (id, username, password, name, email, phone, role)
 VALUES 
-    (1, 'Admin', 'Adminjelszo', 'Adminisztrátor', 'admin@eto.hu', '+36 30 987 6543', 'Admin'),
-    (2, 'User1', 'Userjelszo', 'Biztonsági vezető', 'user1@eto.hu', '+36 30 123 4567', 'Biztonsági vezető'),
-    (3, 'szeconnect', 'SzeConnect2026!', 'SZE Connect Projektvezető', 'szeconnect.projektmunka@gmail.com', '+36 30 555 9876', 'Biztonsági vezető')
+    (1, 'Admin', 'scrypt$4689508c9f9cf5f5ed994603fe1019cf$446702fa08118a3dfa5f8af2af9ec5ba5e7775dbc0ca3258c1f07fb06b99d287d02abc32698e1af2c77dc28b568d3e13261d29ab61a20b34fa297d921003e90e', 'Adminisztrátor', 'admin@eto.hu', '+36 30 987 6543', 'Admin'),
+    (2, 'User1', 'scrypt$67abcafc9df0f8d20d79d35430072b46$89649bc349934acf65744e5f9f3fd83b7283e7606f2e40b1991a67df0013e14f46a128cfc22a28187ce10437c2bf74800db480f18becfd6d1acdde26ffa13477', 'Biztonsági vezető', 'user1@eto.hu', '+36 30 123 4567', 'Biztonsági vezető'),
+    (3, 'szeconnect', 'scrypt$5b17fa0d8ab18a18bb4c68c9622e9385$a983444c24c17ed77d1854c7122727af2ea07c55de81df4fb7fdef39daa5266b6eea115b451ee8b82c6771bf14199ce8ee03dbb9e64fbc3b959d14cabab05df9', 'SZE Connect Projektvezető', 'szeconnect.projektmunka@gmail.com', '+36 30 555 9876', 'Biztonsági vezető')
 ON CONFLICT (username) DO NOTHING;
 
 INSERT INTO master_data (id, organization, official_email, report_email, phone, address, organizer, chief_organizer, healthcare_provider, disaster_protection_provider)
